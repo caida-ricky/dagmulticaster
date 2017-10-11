@@ -87,13 +87,16 @@ static void *per_dagstream(void *threaddata) {
     void *bottom, *top;
     uint32_t available = 0;
     int sock = -1;
+    uint64_t allrecords = 0;
 
     /* Set polling parameters
      * TODO: are these worth making configurable?
      * Currently defined in dagmultiplexer.h.
      */
     mindata = DAG_POLL_MINDATA;
+    maxwait.tv_sec = 0;
     maxwait.tv_usec = DAG_POLL_MAXWAIT;
+    poll.tv_sec = 0;
     poll.tv_usec = DAG_POLL_FREQ;
 
     if (dag_set_stream_poll64(dst->params.dagfd, dst->params.streamnum,
@@ -124,6 +127,8 @@ static void *per_dagstream(void *threaddata) {
     bottom = NULL;
     top = NULL;
 
+    fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
+
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
         uint16_t records_walked = 0;
@@ -143,6 +148,7 @@ static void *per_dagstream(void *threaddata) {
          */
         available = walk_stream_buffer((char *)bottom, (char *)top,
                 &records_walked);
+        allrecords += records_walked;
         if (available > 0) {
             if (ndag_send_encap_records(sock, (char *)bottom, available,
                     records_walked) < 0) {
@@ -154,6 +160,8 @@ static void *per_dagstream(void *threaddata) {
 
     /* Close socket */
     close(sock);
+    fprintf(stderr, "Halting stream %d after processing %lu records\n",
+            dst->params.streamnum, allrecords);
 
     /* Stop stream */
 stopstream:
@@ -194,6 +202,9 @@ static int start_dag_thread(streamparams_t *params, int index,
     /* Attach to a stream */
     if (dag_attach_stream64(params->dagfd, nextslot->params.streamnum, 0,
             8 * 1024 * 1024) != 0) {
+        if (errno == ENOMEM)
+            return 0;
+
         fprintf(stderr, "Failed to attach to DAG stream %d: %s\n",
                 nextslot->params.streamnum, strerror(errno));
         return -1;
@@ -205,7 +216,7 @@ static int start_dag_thread(streamparams_t *params, int index,
     if (dag_get_stream_buffer_size64(params->dagfd,
             nextslot->params.streamnum) <= 0) {
         dag_detach_stream(params->dagfd, nextslot->params.streamnum);
-        return -1;
+        return 0;
     }
 
 
@@ -396,6 +407,9 @@ int main(int argc, char **argv) {
                 goto halteverything;
             }
 
+            if (ret == 0)
+                break;
+
             threadcount += 1;
         }
 
@@ -422,7 +436,7 @@ int main(int argc, char **argv) {
 
         /* Join on all threads */
         pthread_join(beaconer.tid, NULL);
-        for (i = 0; i < maxstreams; i++) {
+        for (i = 0; i < threadcount; i++) {
             pthread_join(dagthreads[i].tid, NULL);
         }
         free(dagthreads);

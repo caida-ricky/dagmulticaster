@@ -39,8 +39,8 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr) {
     }
 
     if (setsockopt(sock,
-            gotten->ai_family = PF_INET6 ? IPPROTO_IPV6: IPPROTO_IP,
-            gotten->ai_family = PF_INET6 ? IPV6_MULTICAST_HOPS :
+            gotten->ai_family == PF_INET6 ? IPPROTO_IPV6: IPPROTO_IP,
+            gotten->ai_family == PF_INET6 ? IPV6_MULTICAST_HOPS :
                     IP_MULTICAST_TTL,
             (char *)&ttl, sizeof(ttl)) != 0) {
         fprintf(stderr, "Failed to configure multicast TTL for %s:%s -- %s\n",
