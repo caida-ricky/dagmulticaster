@@ -7,6 +7,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <assert.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netdb.h>
 
 #include <pthread.h>
 #include <dagapi.h>
@@ -88,6 +91,7 @@ static void *per_dagstream(void *threaddata) {
     uint32_t available = 0;
     int sock = -1;
     uint64_t allrecords = 0;
+    struct addrinfo *targetinfo = NULL;
 
     /* Set polling parameters
      * TODO: are these worth making configurable?
@@ -116,7 +120,7 @@ static void *per_dagstream(void *threaddata) {
 
     /* Create an exporting socket */
     sock = ndag_create_multicaster_socket(dst->params.exportport,
-            dst->params.multicastgroup);
+            dst->params.multicastgroup, dst->params.sourceaddr, &targetinfo);
     if (sock == -1) {
         fprintf(stderr, "Failed to create multicaster socket for DAG stream %d\n",
                 dst->params.streamnum);
@@ -159,7 +163,6 @@ static void *per_dagstream(void *threaddata) {
     }
 
     /* Close socket */
-    close(sock);
     fprintf(stderr, "Halting stream %d after processing %lu records\n",
             dst->params.streamnum, allrecords);
 
@@ -169,6 +172,7 @@ stopstream:
         fprintf(stderr, "Error while stopping DAG stream %d: %s\n",
                 dst->params.streamnum, strerror(errno));
     }
+    ndag_close_multicaster_socket(sock, targetinfo);
 
 detachstream:
     /* Detach stream */
@@ -289,13 +293,14 @@ void print_help(char *progname) {
 
     fprintf(stderr,
         "Usage: %s [ -d dagdevice ] [ -p beaconport ] [ -m monitorid ] [ -c ]\n"
-        "          [ -a multicastaddress ]\n", progname);
+        "          [ -a multicastaddress ] [ -s sourceaddress ]\n", progname);
 
 }
 
 int main(int argc, char **argv) {
     char *dagdev = NULL;
     char *multicastgroup = NULL;
+    char *sourceaddr = NULL;
     streamparams_t params;
     int dagfd, maxstreams, ret, i, errorstate;
     dagstreamthread_t *dagthreads = NULL;
@@ -335,11 +340,13 @@ int main(int argc, char **argv) {
             { "monitorid", 1, 0, 'm' },
             { "beaconport", 1, 0, 'p' },
             { "compress", 0, 0, 'c' },
-            { "address", 1, 0, 'a' },
+            { "groupaddr", 1, 0, 'a' },
+            { "sourceaddr", 1, 0, 's' },
             { NULL, 0, 0, 0 }
         };
 
-        c = getopt_long(argc, argv, "d:hm:p:c", long_options, &option_index);
+        c = getopt_long(argc, argv, "a:s:d:hm:p:c", long_options,
+                &option_index);
         if (c == -1)
             break;
 
@@ -358,6 +365,9 @@ int main(int argc, char **argv) {
                 break;
             case 'a':
                 multicastgroup = strdup(optarg);
+                break;
+            case 's':
+                sourceaddr = strdup(optarg);
                 break;
             case 'h':
             default:
@@ -387,6 +397,11 @@ int main(int argc, char **argv) {
     if (multicastgroup == NULL) {
         multicastgroup = strdup("225.0.0.225");
     }
+    if (sourceaddr == NULL) {
+        fprintf(stderr,
+            "Warning: no source address specified. Using default interface.");
+        sourceaddr = strdup("0.0.0.0");
+    }
 
     /* Open DAG card */
     fprintf(stderr, "Attempting to open DAG device: %s\n", dagdev);
@@ -398,6 +413,7 @@ int main(int argc, char **argv) {
     }
     params.dagfd = dagfd;
     params.multicastgroup = multicastgroup;
+    params.sourceaddr = sourceaddr;
 
     halted = 0;
     threadcount = 0;
@@ -457,7 +473,7 @@ int main(int argc, char **argv) {
             goto halteverything;
         }
 
-
+        beaconer->params.srcaddr = sourceaddr;
         beaconer->params.groupaddr = multicastgroup;
         beaconer->params.beaconport = beaconport;
         beaconer->params.numstreams = threadcount;
@@ -520,6 +536,7 @@ halteverything:
 
     free(dagdev);
     free(multicastgroup);
+    free(sourceaddr);
 }
 
 

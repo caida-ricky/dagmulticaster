@@ -17,10 +17,12 @@ int ndag_interrupt_beacon(void) {
     return halted;
 }
 
-int ndag_create_multicaster_socket(uint16_t port, char *groupaddr) {
+int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
+        char *srcaddr, struct addrinfo **targetinfo) {
 
     struct addrinfo hints;
     struct addrinfo *gotten;
+    struct addrinfo *source;
     char portstr[16];
     int sock;
     uint32_t ttl = 1;       /* TODO make this configurable */
@@ -33,17 +35,24 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr) {
     snprintf(portstr, 15, "%u", port);
 
     if (getaddrinfo(groupaddr, portstr, &hints, &gotten) != 0) {
-        fprintf(stderr, "Call to getaddrinfo failed for %s:%s -- %s\n",
+        fprintf(stderr, "nDAG: Call to getaddrinfo failed for %s:%s -- %s\n",
                 groupaddr, portstr, strerror(errno));
+        return -1;
+    }
+    *targetinfo = gotten;
+
+    if (getaddrinfo(srcaddr, NULL, &hints, &source) != 0) {
+        fprintf(stderr, "nDAG: Call to getaddrinfo failed for %s:NULL -- %s\n",
+                srcaddr, strerror(errno));
         return -1;
     }
 
     sock = socket(gotten->ai_family, gotten->ai_socktype, 0);
     if (sock < 0) {
-        fprintf(stderr, "Failed to create multicast socket for %s:%s -- %s\n",
+        fprintf(stderr,
+                "nDAG: Failed to create multicast socket for %s:%s -- %s\n",
                 groupaddr, portstr, strerror(errno));
-        freeaddrinfo(gotten);
-        return -1;
+        goto sockcreateover;
     }
 
     if (setsockopt(sock,
@@ -51,14 +60,39 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr) {
             gotten->ai_family == PF_INET6 ? IPV6_MULTICAST_HOPS :
                     IP_MULTICAST_TTL,
             (char *)&ttl, sizeof(ttl)) != 0) {
-        fprintf(stderr, "Failed to configure multicast TTL for %s:%s -- %s\n",
+        fprintf(stderr,
+                "nDAG: Failed to configure multicast TTL for %s:%s -- %s\n",
                 groupaddr, portstr, strerror(errno));
-        freeaddrinfo(gotten);
-        return -1;
+        close(sock);
+        sock = -1;
+        goto sockcreateover;
     }
 
-    freeaddrinfo(gotten);
+    if (setsockopt(sock,
+            source->ai_family == PF_INET6 ? IPPROTO_IPV6: IPPROTO_IP,
+            source->ai_family == PF_INET6 ? IPV6_MULTICAST_IF: IP_MULTICAST_IF,
+            source->ai_addr, source->ai_addrlen) != 0) {
+        fprintf(stderr,
+                "nDAG: Failed to set outgoing multicast interface %s -- %s\n",
+                srcaddr, strerror(errno));
+        close(sock);
+        sock = -1;
+        goto sockcreateover;
+    }
+
+sockcreateover:
+    freeaddrinfo(source);
     return sock;
+}
+
+void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo) {
+    if (targetinfo) {
+        freeaddrinfo(targetinfo);
+    }
+
+    if (ndagsock >= 0) {
+        close(ndagsock);
+    }
 }
 
 int ndag_send_encap_records(int sock, char *buf, uint32_t tosend,
@@ -89,7 +123,7 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
     uint16_t *next;
 
     if (beacsize > NDAG_MAX_DGRAM_SIZE) {
-        fprintf(stderr, "Beacon is too large to fit in a single datagram!\n");
+        fprintf(stderr, "nDAG beacon is too large to fit in a single datagram!\n");
         free(beac);
         return 0;
     }
@@ -115,33 +149,49 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
 
 }
 
+
 void *ndag_start_beacon(void *params) {
 
     ndag_beacon_params_t *nparams = (ndag_beacon_params_t *)params;
     int beacsock;
     char *beaconrec = NULL;
     uint32_t beacsize = 0;
+    struct addrinfo *targetinfo = NULL;
 
     beacsock = ndag_create_multicaster_socket(nparams->beaconport,
-            nparams->groupaddr);
+            nparams->groupaddr, nparams->srcaddr, &targetinfo);
 
     if (beacsock == -1) {
-        fprintf(stderr, "Failed to create multicast socket for beacon thread.\n");
-        pthread_exit(NULL);
+        fprintf(stderr,
+                "Failed to create multicast socket for nDAG beacon thread.\n");
+        goto endbeaconthread;
+    }
+
+    if (targetinfo == NULL) {
+        fprintf(stderr, "Failed to get addrinfo for nDAG beacon thread.\n");
+        goto endbeaconthread;
     }
 
     beacsize = construct_beacon(&beaconrec, nparams);
 
     while (beacsize > 0 && beaconrec != NULL && !halted) {
 
-        fprintf(stderr, "Sending beacon...\n");
+        if (sendto(beacsock, beaconrec, beacsize, 0, targetinfo->ai_addr,
+                    targetinfo->ai_addrlen) != beacsize) {
+            fprintf(stderr, "Failed to send the full nDAG beacon: %s\n",
+                    strerror(errno));
+            break;
+        }
         usleep(nparams->frequency * 1000);
     }
 
     if (beaconrec) {
         free(beaconrec);
     }
-    close(beacsock);
+
+endbeaconthread:
+    fprintf(stderr, "Halting nDAG beacon thread.\n");
+    ndag_close_multicaster_socket(beacsock, targetinfo);
     pthread_exit(NULL);
 
 }

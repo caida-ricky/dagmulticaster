@@ -17,6 +17,7 @@ typedef struct streamparams {
     uint16_t exportport;
     uint8_t compressflag;
     char *multicastgroup;
+    char *sourceaddr;
 } streamparams_t;
 
 typedef struct dsthread {

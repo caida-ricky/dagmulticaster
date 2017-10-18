@@ -15,6 +15,7 @@
 /* Required for multicasting NDAG records */
 
 typedef struct ndagbeaconparams {
+    char *srcaddr;
     char *groupaddr;
     uint16_t beaconport;
     uint16_t numstreams;
@@ -51,7 +52,9 @@ typedef struct ndag_common_header {
 
 int ndag_interrupt_beacon(void);
 void *ndag_start_beacon(void *params);
-int ndag_create_multicaster_socket(uint16_t port, char *groupaddr);
+int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
+        char *srcaddr, struct addrinfo **targetinfo);
+void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo);
 int ndag_send_encap_records(int sock, char *buf, uint32_t tosend,
         uint16_t reccount);
 int ndag_send_encap_libtrace(int sock, libtrace_packet_t *packet);
