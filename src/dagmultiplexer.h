@@ -6,6 +6,9 @@
 #define DAG_POLL_FREQ 10000
 
 #define DAG_MULTIPLEX_PORT_INCR 2
+#define DAG_MULTIPLEX_BEACON_FREQ 1000      // milliseconds
+
+#include "ndagmulticaster.h"
 
 typedef struct streamparams {
     int dagfd;
@@ -27,8 +30,7 @@ typedef struct dsthread {
 
 typedef struct beaconthread {
     pthread_t tid;
-    char *multicastgroup;
-    uint16_t port;
+    ndag_beacon_params_t params;
 } beaconthread_t;
 
 #endif

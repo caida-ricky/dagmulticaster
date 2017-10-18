@@ -178,6 +178,7 @@ detachstream:
     }
 exitthread:
     /* Finished */
+    fprintf(stderr, "Exiting thread for stream %d\n", dst->params.streamnum);
     pthread_exit(NULL);
 }
 
@@ -247,10 +248,39 @@ static int start_dag_thread(streamparams_t *params, int index,
 }
 
 
-int create_multiplex_beaconer(beaconthread_t *bthread,  char *groupaddr,
-        uint16_t beaconport, uint16_t firststreamport, uint16_t numstreams) {
+int create_multiplex_beaconer(beaconthread_t *bthread) {
 
-    /* TODO write this whole thing */
+    int ret;
+
+#ifdef __linux__
+    pthread_attr_t attrib;
+    cpu_set_t cpus;
+    int i;
+#endif
+
+#ifdef __linux__
+
+	/* Allow this thread to appear on any core */
+    CPU_ZERO(&cpus);
+    for (i = 0; i < get_nb_cores(); i++) {
+		CPU_SET(i, &cpus);
+	}
+    pthread_attr_init(&attrib);
+    pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
+    ret = pthread_create(&(bthread->tid), &attrib, ndag_start_beacon,
+            (void *)&(bthread->params));
+    pthread_attr_destroy(&attrib);
+
+#else
+    ret = pthread_create(&(bthread->tid), NULL, ndag_start_beacon,
+            (void *)&(bthread->params));
+#endif
+
+
+    if (ret != 0) {
+        return -1;
+    }
+
     return 1;
 
 }
@@ -269,7 +299,7 @@ int main(int argc, char **argv) {
     streamparams_t params;
     int dagfd, maxstreams, ret, i, errorstate;
     dagstreamthread_t *dagthreads = NULL;
-    beaconthread_t beaconer;
+    beaconthread_t *beaconer = NULL;
     uint16_t beaconport = 9001;
     time_t t;
     struct sigaction sigact;
@@ -371,6 +401,8 @@ int main(int argc, char **argv) {
 
     halted = 0;
     threadcount = 0;
+    beaconer = (beaconthread_t *)malloc(sizeof(beaconthread_t));
+
     while (!halted) {
         errorstate = 0;
         dagthreads = NULL;
@@ -425,9 +457,21 @@ int main(int argc, char **argv) {
             goto halteverything;
         }
 
+
+        beaconer->params.groupaddr = multicastgroup;
+        beaconer->params.beaconport = beaconport;
+        beaconer->params.numstreams = threadcount;
+        beaconer->params.streamports = (uint16_t *)malloc(sizeof(uint16_t) * threadcount);
+        beaconer->params.frequency = DAG_MULTIPLEX_BEACON_FREQ;
+        beaconer->params.monitorid = params.monitorid;
+
+        for (i = 0; i < threadcount; i++) {
+            beaconer->params.streamports[i] =
+                    firstport + (DAG_MULTIPLEX_PORT_INCR * i);
+        }
+
         /* Create beaconing thread */
-        ret = create_multiplex_beaconer(&beaconer, multicastgroup, beaconport,
-                firstport, threadcount);
+        ret = create_multiplex_beaconer(beaconer);
         if (ret < 0) {
             fprintf(stderr, "Failed to create beaconing thread. Exiting.\n");
             errorstate = 1;
@@ -435,10 +479,11 @@ int main(int argc, char **argv) {
         }
 
         /* Join on all threads */
-        pthread_join(beaconer.tid, NULL);
         for (i = 0; i < threadcount; i++) {
             pthread_join(dagthreads[i].tid, NULL);
         }
+        ndag_interrupt_beacon();
+        pthread_join(beaconer->tid, NULL);
         free(dagthreads);
         dagthreads = NULL;
         threadcount = 0;
@@ -467,6 +512,8 @@ halteverything:
     if (dagthreads) {
         free(dagthreads);
     }
+    free(beaconer->params.streamports);
+    free(beaconer);
 
     /* Close DAG card */
     dag_close(dagfd);
