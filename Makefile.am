@@ -1,3 +1,3 @@
-SUBDIRS=libndag-server src
+SUBDIRS=libndag-server src testclient
 
 AUTOMAKE_OPTIONS=foreign

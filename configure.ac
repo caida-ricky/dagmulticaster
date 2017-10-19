@@ -19,7 +19,8 @@ AC_CHECK_LIB([trace], [trace_get_payload_length],,trace_found=0)
 AC_CHECK_LIB([dag], [dag_attach_stream],,dag_found=0)
 AC_CHECK_LIB([pthread], [pthread_create],,pthread_found=0)
 
-AC_CONFIG_FILES([Makefile libndag-server/Makefile src/Makefile])
+AC_CONFIG_FILES([Makefile libndag-server/Makefile src/Makefile
+                testclient/Makefile])
 
 if test "$trace_found" = 0; then
         AC_MSG_ERROR(Required library libtrace not found; use LDFLAGS to specify library location)
