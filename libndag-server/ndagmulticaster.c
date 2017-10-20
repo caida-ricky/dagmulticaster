@@ -96,13 +96,13 @@ void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo) {
 }
 
 static inline char *populate_common_header(char *bufstart,
-        uint16_t monitorid) {
+        uint16_t monitorid, uint8_t pkttype) {
 
     ndag_common_t *hdr;
     hdr = (ndag_common_t *)bufstart;
     hdr->magic = htonl(NDAG_MAGIC_NUMBER);
     hdr->version = NDAG_EXPORT_VERSION;
-    hdr->type = NDAG_PKT_BEACON;
+    hdr->type = pkttype;
     hdr->monitorid = htons(monitorid);
 
     return bufstart + sizeof(ndag_common_t);
@@ -125,7 +125,7 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
     }
 
     encap = (ndag_encap_t *)(populate_common_header(params->sendbuf,
-            params->monitorid));
+            params->monitorid, NDAG_PKT_ENCAPERF));
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
 
@@ -188,7 +188,8 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
         return 0;
     }
 
-    next = (uint16_t *)(populate_common_header(beac, nparams->monitorid));
+    next = (uint16_t *)(populate_common_header(beac, nparams->monitorid,
+            NDAG_PKT_BEACON));
 
     *next = htons(nparams->numstreams);
     next ++;
