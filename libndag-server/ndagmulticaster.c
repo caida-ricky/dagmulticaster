@@ -130,19 +130,19 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
     encap->streamid = htons(params->streamnum);
 
     if (tosend > NDAG_MAX_DGRAM_SIZE) {
-        encap->truncflag = 1;
+        /* Use MSB for indicating truncation */
+        reccount |= 0x8000;
         pktsize = NDAG_MAX_DGRAM_SIZE + sizeof(ndag_common_t) +
                 sizeof(ndag_encap_t);
         tosend = NDAG_MAX_DGRAM_SIZE;
     } else {
-        encap->truncflag = 0;
         pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
     }
 
     /* TODO add ability to compress the ERF records.
+     * Use 2nd MSB for indicating compression.
      * Note: this may not play nicely with truncation?
      */
-    encap->compressflag = 0;
     encap->recordcount = ntohs(reccount);
 
     /* memcpy :( :( */

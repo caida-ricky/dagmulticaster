@@ -63,9 +63,7 @@ typedef struct ndag_common_header {
 typedef struct ndag_encap {
     uint32_t seqno;
     uint16_t streamid;
-    unsigned int truncflag:1;
-    unsigned int compressflag:1;
-    unsigned int recordcount:14;  /* acts as RT type for ENCAPRT records */
+    uint16_t recordcount; /* acts as RT type for ENCAPRT records */
 } PACKED ndag_encap_t;
 
 int ndag_interrupt_beacon(void);
