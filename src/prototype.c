@@ -86,6 +86,7 @@ static void *per_dagstream(void *threaddata) {
 
     dag_size_t mindata;
     struct timeval maxwait, poll;
+    ndag_encap_params_t state;
     dagstreamthread_t *dst = (dagstreamthread_t *)threaddata;
     void *bottom, *top;
     uint32_t available = 0;
@@ -127,6 +128,12 @@ static void *per_dagstream(void *threaddata) {
         goto stopstream;
     }
 
+    state.sock = sock;
+    state.target = targetinfo;
+    state.seqno = 1;
+    state.monitorid = dst->params.monitorid;
+    state.streamnum = dst->params.streamnum;
+    state.sendbuf = NULL;
 
     bottom = NULL;
     top = NULL;
@@ -154,12 +161,16 @@ static void *per_dagstream(void *threaddata) {
                 &records_walked);
         allrecords += records_walked;
         if (available > 0) {
-            if (ndag_send_encap_records(sock, (char *)bottom, available,
-                    records_walked) < 0) {
+            if (ndag_send_encap_records(&state, (char *)bottom, available,
+                    records_walked) == 0) {
                 break;
             }
         }
         bottom += available;
+    }
+
+    if (state.sendbuf) {
+        free(state.sendbuf);
     }
 
     /* Close socket */
@@ -418,6 +429,7 @@ int main(int argc, char **argv) {
     halted = 0;
     threadcount = 0;
     beaconer = (beaconthread_t *)malloc(sizeof(beaconthread_t));
+    firstport = 10000 + (rand() % 50000);
 
     while (!halted) {
         errorstate = 0;
@@ -435,7 +447,6 @@ int main(int argc, char **argv) {
 
         dagthreads = (dagstreamthread_t *)(
                 malloc(sizeof(dagstreamthread_t) * maxstreams));
-        firstport = 10000 + (rand() % 50000);
 
         sigemptyset(&sig_block_all);
         if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
@@ -449,6 +460,7 @@ int main(int argc, char **argv) {
             ret = start_dag_thread(&params, i, &(dagthreads[threadcount]),
                     firstport);
 
+
             if (ret < 0) {
                 fprintf(stderr, "Error creating new thread for DAG processing\n");
                 errorstate = 1;
@@ -456,7 +468,7 @@ int main(int argc, char **argv) {
             }
 
             if (ret == 0)
-                break;
+                continue;
 
             threadcount += 1;
         }
