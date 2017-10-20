@@ -95,12 +95,68 @@ void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo) {
     }
 }
 
-int ndag_send_encap_records(int sock, char *buf, uint32_t tosend,
-        uint16_t reccount) {
+static inline char *populate_common_header(char *bufstart,
+        uint16_t monitorid) {
 
+    ndag_common_t *hdr;
+    hdr = (ndag_common_t *)bufstart;
+    hdr->magic = htonl(NDAG_MAGIC_NUMBER);
+    hdr->version = NDAG_EXPORT_VERSION;
+    hdr->type = NDAG_PKT_BEACON;
+    hdr->monitorid = htons(monitorid);
 
-    /* TODO actually construct and send datagrams to the multicast socket! */
+    return bufstart + sizeof(ndag_common_t);
+}
 
+uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
+        uint32_t tosend, uint16_t reccount) {
+
+    ndag_encap_t *encap;
+    uint32_t pktsize = 0;
+
+    if (params->sendbuf == NULL) {
+        params->sendbuf = (char *)malloc(NDAG_MAX_DGRAM_SIZE +
+                sizeof(ndag_common_t) + sizeof(ndag_encap_t));
+    }
+
+    if (params->sendbuf == NULL) {
+        fprintf(stderr, "Failed to allocate memory for nDAG encap. ERF!\n");
+        return 0;
+    }
+
+    encap = (ndag_encap_t *)(populate_common_header(params->sendbuf,
+            params->monitorid));
+    encap->seqno = htonl(params->seqno);
+    encap->streamid = htons(params->streamnum);
+
+    if (tosend > NDAG_MAX_DGRAM_SIZE) {
+        encap->truncflag = 1;
+        pktsize = NDAG_MAX_DGRAM_SIZE + sizeof(ndag_common_t) +
+                sizeof(ndag_encap_t);
+        tosend = NDAG_MAX_DGRAM_SIZE;
+    } else {
+        encap->truncflag = 0;
+        pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
+    }
+
+    /* TODO add ability to compress the ERF records.
+     * Note: this may not play nicely with truncation?
+     */
+    encap->compressflag = 0;
+    encap->recordcount = ntohs(reccount);
+
+    /* memcpy :( :( */
+    memcpy(((char *)encap) + sizeof(ndag_encap_t), buf, tosend);
+
+    if (sendto(params->sock, params->sendbuf, pktsize, 0,
+                params->target->ai_addr,
+                params->target->ai_addrlen) != pktsize) {
+        fprintf(stderr, "Failed to send the full nDAG encap. record: %s\n",
+                strerror(errno));
+        reccount = 0;
+    }
+
+    params->seqno += 1;
 
     return reccount;
 }
@@ -118,9 +174,13 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
             (sizeof(uint16_t) * (nparams->numstreams + 1));
 
     char *beac = (char *)malloc(beacsize);
-    ndag_common_t *hdr;
     int i;
     uint16_t *next;
+
+    if (beac == NULL) {
+        fprintf(stderr, "Failed to allocate memory for nDAG beacon!\n");
+        return 0;
+    }
 
     if (beacsize > NDAG_MAX_DGRAM_SIZE) {
         fprintf(stderr, "nDAG beacon is too large to fit in a single datagram!\n");
@@ -128,13 +188,7 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
         return 0;
     }
 
-    hdr = (ndag_common_t *)beac;
-    hdr->magic = htonl(NDAG_MAGIC_NUMBER);
-    hdr->version = NDAG_EXPORT_VERSION;
-    hdr->type = NDAG_PKT_BEACON;
-    hdr->monitorid = htons(nparams->monitorid);
-
-    next = (uint16_t *)(beac + sizeof(ndag_common_t));
+    next = (uint16_t *)(populate_common_header(beac, nparams->monitorid));
 
     *next = htons(nparams->numstreams);
     next ++;

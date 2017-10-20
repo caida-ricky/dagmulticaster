@@ -24,6 +24,15 @@ typedef struct ndagbeaconparams {
     uint16_t monitorid;
 } ndag_beacon_params_t;
 
+typedef struct ndagencapparams {
+    int sock;
+    uint16_t monitorid;
+    uint16_t streamnum;
+    uint32_t seqno;
+    struct addrinfo *target;
+    char *sendbuf;
+} ndag_encap_params_t;
+
 enum {
     NDAG_PKT_BEACON = 0x01,
     NDAG_PKT_ENCAPERF = 0x02,
@@ -50,13 +59,22 @@ typedef struct ndag_common_header {
  * uint16_t laststreamport;
  */
 
+/* Encapsulation header -- used by both ENCAPERF and ENCAPRT records */
+typedef struct ndag_encap {
+    uint32_t seqno;
+    uint16_t streamid;
+    unsigned int truncflag:1;
+    unsigned int compressflag:1;
+    unsigned int recordcount:14;  /* acts as RT type for ENCAPRT records */
+} PACKED ndag_encap_t;
+
 int ndag_interrupt_beacon(void);
 void *ndag_start_beacon(void *params);
 int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
         char *srcaddr, struct addrinfo **targetinfo);
 void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo);
-int ndag_send_encap_records(int sock, char *buf, uint32_t tosend,
-        uint16_t reccount);
+uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
+        uint32_t tosend, uint16_t reccount);
 int ndag_send_encap_libtrace(int sock, libtrace_packet_t *packet);
 
 
