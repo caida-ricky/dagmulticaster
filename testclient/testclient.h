@@ -14,15 +14,26 @@ typedef struct controlparams {
 
 typedef struct streamsource {
     char *groupaddr;
-    char *localaddr;
+    char *localiface;
     uint16_t port;
 } streamsource_t;
 
+typedef struct streamsock {
+    char *groupaddr;
+    int sock;
+    struct addrinfo *srcaddr;
+    uint16_t port;
+    uint32_t expectedseq;
+} streamsock_t;
+
 typedef struct recvthread {
-    streamsource_t *sources;
+    streamsock_t *sources;
     uint16_t sourcecount;
     pthread_t tid;
     libtrace_message_queue_t mqueue;
+    int threadindex;
+
+    uint64_t records_received;
 } recvthread_t;
 
 

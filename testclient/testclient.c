@@ -150,52 +150,6 @@ sockcreateover:
     return sock;
 }
 
-
-static void *receiver_thread_run(void *threaddata) {
-
-    recvthread_t *rt = (recvthread_t *)threaddata;
-    mymessage_t msg;
-    int threadhalted = 0;
-
-    while (!threadhalted) {
-
-        if (libtrace_message_queue_try_get(&(rt->mqueue), (void *)&msg) !=
-                    LIBTRACE_MQ_FAILED) {
-    
-            switch(msg.type) {
-                case NDAG_CLIENT_HALT:
-                    threadhalted = 1;
-                    break;
-                case NDAG_CLIENT_RESTARTED:
-                    /* TODO */
-                    break;
-                case NDAG_CLIENT_NEWGROUP:
-                    /* TODO */
-                    break;
-            }
-            continue;
-        }
-
-        /* No streams currently joined, sleep for a bit to avoid CPU burn */
-        if (rt->sourcecount == 0) {
-            usleep(10000);
-            continue;
-        }
-
-        /* TODO select on sockets and read any records that come in */
-
-    }
-    pthread_exit(NULL);
-
-}
-
-static int create_receiver_thread(recvthread_t *tdata) {
-
-    return generic_thread_start(&(tdata->tid), receiver_thread_run,
-            (void *)tdata);
-
-}
-
 static uint8_t check_ndag_header(char *msgbuf, int msgsize) {
 
     ndag_common_t *header = (ndag_common_t *)msgbuf;
@@ -219,11 +173,203 @@ static uint8_t check_ndag_header(char *msgbuf, int msgsize) {
     return header->type;
 }
 
+static int add_new_streamsock(recvthread_t *rt, streamsource_t src) {
+
+    streamsock_t *ssock = NULL;
+
+    if (rt->sourcecount == 0) {
+        rt->sources = (streamsock_t *)malloc(sizeof(streamsock_t) * 10);
+    } else if ((rt->sourcecount % 10) == 0) {
+        rt->sources = (streamsock_t *)realloc(rt->sources, sizeof(streamsock_t) * (rt->sourcecount + 10));
+    }
+
+    ssock = &(rt->sources[rt->sourcecount]);
+
+    ssock->sock = join_multicast_group(src.groupaddr, src.localiface,
+            NULL, src.port, &(ssock->srcaddr));
+
+    if (ssock->sock < 0) {
+        return -1;
+    }
+
+    ssock->port = src.port;
+    ssock->groupaddr = src.groupaddr;
+    ssock->expectedseq = 0;
+    rt->sourcecount += 1;
+
+    fprintf(stderr, "Added new stream %s:%u to thread %d\n",
+            ssock->groupaddr, ssock->port, rt->threadindex);
+
+    return ssock->port;
+}
+
+static uint16_t parse_streamed_record(streamsock_t *ssock, int threadindex,
+        char *buf, int recordsize) {
+    uint8_t type;
+    uint16_t reccount = 0;
+    ndag_encap_t *encaphdr;
+    ndag_common_t *commonhdr = (ndag_common_t *)buf;
+
+    type = check_ndag_header(buf, recordsize);
+    recordsize -= sizeof(ndag_common_t);
+
+    if (type == NDAG_PKT_ENCAPERF) {
+        encaphdr = (ndag_encap_t *)(buf + sizeof(ndag_common_t));
+
+        /* TODO deal with seqno wrap, reordering... */
+        if (ssock->expectedseq != 0 &&
+                ntohl(encaphdr->seqno) != ssock->expectedseq) {
+            fprintf(stderr, "Missing %lu records from %s:%u  (%u:%u)\n",
+                    ntohl(encaphdr->seqno) - ssock->expectedseq,
+                    ssock->groupaddr, ssock->port, ntohs(commonhdr->monitorid),
+                    ntohs(encaphdr->streamid));
+        }
+        ssock->expectedseq = ntohl(encaphdr->seqno) + 1;
+
+        reccount = ntohs(encaphdr->recordcount);
+        if ((reccount & 0x8000) != 0) {
+            /* Not really worth a warning, but useful for testing right now */
+            fprintf(stderr, "Warning: received truncated record on %s:%u\n",
+                    ssock->groupaddr, ssock->port);
+            reccount &= (0x7fff);
+        }
+        return reccount;
+    }
+
+    return 0;
+}
+
+static int receive_encap_records(recvthread_t *rt) {
+    fd_set allgroups;
+    int maxfd, i, ret;
+    struct timeval timeout;
+    char buf[MAXBUFSIZE];
+
+    FD_ZERO(&allgroups);
+    maxfd = 0;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 10000;
+
+    /* TODO maybe need a way to tidy up "dead" sockets and signal back
+     * to the control thread that we've killed the socket for a particular
+     * port.
+     */
+
+    for (i = 0; i < rt->sourcecount; i ++) {
+        if (rt->sources[i].sock != -1) {
+            FD_SET(rt->sources[i].sock, &allgroups);
+            if (rt->sources[i].sock > maxfd) {
+                maxfd = rt->sources[i].sock;
+            }
+        }
+    }
+
+    if (select(maxfd + 1, &allgroups, NULL, NULL, &timeout) < 0) {
+        fprintf(stderr, "Error waiting to receive records: %s\n",
+                strerror(errno));
+        return -1;
+    }
+
+    for (i = 0; i < rt->sourcecount; i ++) {
+        if (rt->sources[i].sock == -1) {
+            continue;
+        }
+
+        if (!FD_ISSET(rt->sources[i].sock, &allgroups)) {
+            continue;
+        }
+
+        ret = recvfrom(rt->sources[i].sock, buf, MAXBUFSIZE, 0,
+                    rt->sources[i].srcaddr->ai_addr,
+                    &(rt->sources[i].srcaddr->ai_addrlen));
+        if (ret < 0) {
+            fprintf(stderr,
+                "Error receiving encapsulated records from %s:%u -- %s\n",
+                rt->sources[i].groupaddr, rt->sources[i].port,
+                strerror(errno));
+            close(rt->sources[i].sock);
+            rt->sources[i].sock = -1;
+            continue;
+        }
+
+        if (ret == 0) {
+            fprintf(stderr, "Received zero bytes on the channel for %s:%u.\n",
+                rt->sources[i].groupaddr, rt->sources[i].port);
+            close(rt->sources[i].sock);
+            rt->sources[i].sock = -1;
+            continue;
+        }
+
+        if ((ret = parse_streamed_record(&(rt->sources[i]), rt->threadindex,
+                    buf, ret)) == 0) {
+            fprintf(stderr, "Received bogus records on the channel: %s:%u.\n",
+                rt->sources[i].groupaddr, rt->sources[i].port);
+            /* Still try to keep going... */
+            continue;
+        }
+        rt->records_received += ret;
+    }
+    return 1;
+}
+
+static void *receiver_thread_run(void *threaddata) {
+
+    recvthread_t *rt = (recvthread_t *)threaddata;
+    mymessage_t msg;
+    int threadhalted = 0;
+
+    while (!threadhalted) {
+
+        if (libtrace_message_queue_try_get(&(rt->mqueue), (void *)&msg) !=
+                    LIBTRACE_MQ_FAILED) {
+
+            switch(msg.type) {
+                case NDAG_CLIENT_HALT:
+                    threadhalted = 1;
+                    break;
+                case NDAG_CLIENT_RESTARTED:
+                    /* TODO */
+                    break;
+                case NDAG_CLIENT_NEWGROUP:
+                    if (add_new_streamsock(rt, msg.contents) < 0) {
+                        fprintf(stderr,
+                            "Error adding new stream to receiver thread.\n");
+                        threadhalted = 1;
+                    }
+                    break;
+            }
+            continue;
+        }
+
+        /* No streams currently joined, sleep for a bit to avoid CPU burn */
+        if (rt->sourcecount == 0) {
+            usleep(10000);
+            continue;
+        }
+
+        if (receive_encap_records(rt) < 0) {
+            break;
+        }
+    }
+
+    fprintf(stderr, "Exiting receiver thread after parsing %lu records.\n",
+            rt->records_received);
+    pthread_exit(NULL);
+
+}
+
+static int create_receiver_thread(recvthread_t *tdata) {
+
+    return generic_thread_start(&(tdata->tid), receiver_thread_run,
+            (void *)tdata);
+
+}
+
 static int parse_control_message(char *msgbuf, int msgsize,
-        recvthread_t *rthreads, uint32_t *nextthread, controlparams_t *params,
+        recvthread_t *rthreads, uint16_t *nextthread, controlparams_t *params,
         uint16_t *ptmap) {
 
-
+    mymessage_t alert;
     uint8_t msgtype = check_ndag_header(msgbuf, msgsize);
 
     if (msgtype == 0) {
@@ -255,8 +401,22 @@ static int parse_control_message(char *msgbuf, int msgsize,
         }
 
         for (i = 0; i < numstreams; i++) {
-            /* TODO */
-            fprintf(stdout, "PORT %d: %u\n", i, ntohs(*ptr));
+            uint16_t streamport = ntohs(*ptr);
+
+            if (ptmap[streamport] == 0xffff) {
+                alert.type = NDAG_CLIENT_NEWGROUP;
+                alert.contents.groupaddr = params->groupaddr;
+                alert.contents.localiface = params->localiface;
+                alert.contents.port = streamport;
+
+                ptmap[streamport] = *nextthread;
+
+                libtrace_message_queue_put(
+                        &(rthreads[(*nextthread)].mqueue),
+                        (void *) &alert);
+                *nextthread = ((*nextthread + 1) % params->maxthreads);
+            }
+
             ptr ++;
         }
     } else if (msgtype == NDAG_PKT_RESTARTED) {
@@ -276,7 +436,7 @@ static void *control_thread_run(void *threaddata) {
     controlparams_t *cparams = (controlparams_t *)threaddata;
     recvthread_t *rthreads = NULL;
     uint16_t ptmap[65536];
-    uint32_t nextthread = 0;
+    uint16_t nextthread = 0;
     int sock = -1;
     struct addrinfo *receiveaddr = NULL;
     fd_set listening;
@@ -286,7 +446,7 @@ static void *control_thread_run(void *threaddata) {
     /* ptmap is a dirty hack to allow us to quickly check if we've already
      * assigned a stream to a thread.
      */
-    memset(ptmap, 0, 65536 * sizeof(uint16_t));
+    memset(ptmap, 0xff, 65536 * sizeof(uint16_t));
 
     /* Prepare and start the stream receiver threads. Note that we have
      * a separate set of stream receivers for each control channel -- this
@@ -303,6 +463,8 @@ static void *control_thread_run(void *threaddata) {
     for (i = 0; i < cparams->maxthreads; i++) {
         rthreads[i].sources = NULL;
         rthreads[i].sourcecount = 0;
+        rthreads[i].threadindex = i;
+        rthreads[i].records_received = 0;
         libtrace_message_queue_init(&(rthreads[i].mqueue), sizeof(mymessage_t));
 
         if (create_receiver_thread(&(rthreads[i])) < 0) {
@@ -328,7 +490,7 @@ static void *control_thread_run(void *threaddata) {
         FD_ZERO(&listening);
         FD_SET(sock, &listening);
 
-        timeout.tv_sec = 1;
+        timeout.tv_sec = 0;
         timeout.tv_usec = 500000;
 
         /* Receive the next message from the control channel */
