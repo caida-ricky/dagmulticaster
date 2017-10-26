@@ -195,6 +195,7 @@ static int add_new_streamsock(recvthread_t *rt, streamsource_t src) {
     ssock->port = src.port;
     ssock->groupaddr = src.groupaddr;
     ssock->expectedseq = 0;
+    ssock->monitorid = src.monitor;
     rt->sourcecount += 1;
 
     fprintf(stderr, "Added new stream %s:%u to thread %d\n",
@@ -312,6 +313,16 @@ static int receive_encap_records(recvthread_t *rt) {
     return 1;
 }
 
+static inline int any_restarted_sources(uint16_t monid, recvthread_t *rt) {
+
+    int i;
+    for (i = 0; i < rt->sourcecount; i++) {
+        if (rt->sources[i].monitorid == monid)
+            return 1;
+    }
+    return 0;
+}
+
 static void *receiver_thread_run(void *threaddata) {
 
     recvthread_t *rt = (recvthread_t *)threaddata;
@@ -328,7 +339,12 @@ static void *receiver_thread_run(void *threaddata) {
                     threadhalted = 1;
                     break;
                 case NDAG_CLIENT_RESTARTED:
-                    /* TODO */
+                    /* TODO do something about this? */
+                    if (any_restarted_sources(msg.contents.monitor, rt)) {
+                        fprintf(stderr,
+                                "Upstream monitor %u indicates that it has restarted. Packets may have been lost.\n",
+                                msg.contents.monitor);
+                    }
                     break;
                 case NDAG_CLIENT_NEWGROUP:
                     if (add_new_streamsock(rt, msg.contents) < 0) {
@@ -352,8 +368,8 @@ static void *receiver_thread_run(void *threaddata) {
         }
     }
 
-    fprintf(stderr, "Exiting receiver thread after parsing %lu records.\n",
-            rt->records_received);
+    fprintf(stderr, "Exiting receiver thread %d after parsing %lu records.\n",
+            rt->threadindex, rt->records_received);
     pthread_exit(NULL);
 
 }
@@ -369,8 +385,10 @@ static int parse_control_message(char *msgbuf, int msgsize,
         recvthread_t *rthreads, uint16_t *nextthread, controlparams_t *params,
         uint16_t *ptmap) {
 
+    int i;
     mymessage_t alert;
     uint8_t msgtype = check_ndag_header(msgbuf, msgsize);
+    ndag_common_t *ndaghdr = (ndag_common_t *)msgbuf;
 
     if (msgtype == 0) {
         return -1;
@@ -383,7 +401,6 @@ static int parse_control_message(char *msgbuf, int msgsize,
          * beacon is assigned to a receive thread.
          */
         uint16_t *ptr, numstreams;
-        int i;
 
         if (msgsize < sizeof(uint16_t)) {
             fprintf(stderr, "Malformed beacon (missing number of streams).\n");
@@ -408,6 +425,7 @@ static int parse_control_message(char *msgbuf, int msgsize,
                 alert.contents.groupaddr = params->groupaddr;
                 alert.contents.localiface = params->localiface;
                 alert.contents.port = streamport;
+                alert.contents.monitor = ntohs(ndaghdr->monitorid);
 
                 ptmap[streamport] = *nextthread;
 
@@ -420,8 +438,17 @@ static int parse_control_message(char *msgbuf, int msgsize,
             ptr ++;
         }
     } else if (msgtype == NDAG_PKT_RESTARTED) {
-        /* TODO */
         /* If message is a restart, push that to all active message queues. */
+        alert.type = NDAG_CLIENT_RESTARTED;
+        alert.contents.monitor = ntohs(ndaghdr->monitorid);
+        alert.contents.groupaddr = NULL;
+        alert.contents.localiface = NULL;
+        alert.contents.port = 0;
+        for (i = 0; i < params->maxthreads; i++) {
+            libtrace_message_queue_put(&(rthreads[i].mqueue),
+                    (void *)&alert);
+        }
+
 
     } else {
         fprintf(stderr, "Unexpected message type on control channel: %u\n",

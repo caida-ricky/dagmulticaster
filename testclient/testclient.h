@@ -13,6 +13,7 @@ typedef struct controlparams {
 } controlparams_t;
 
 typedef struct streamsource {
+    uint16_t monitor;
     char *groupaddr;
     char *localiface;
     uint16_t port;
@@ -24,6 +25,7 @@ typedef struct streamsock {
     struct addrinfo *srcaddr;
     uint16_t port;
     uint32_t expectedseq;
+    uint16_t monitorid;
 } streamsock_t;
 
 typedef struct recvthread {
