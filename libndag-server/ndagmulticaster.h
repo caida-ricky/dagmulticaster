@@ -31,6 +31,7 @@ typedef struct ndagencapparams {
     uint32_t seqno;
     struct addrinfo *target;
     char *sendbuf;
+    int compresslevel;
 } ndag_encap_params_t;
 
 enum {

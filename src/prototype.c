@@ -186,6 +186,10 @@ static void *per_dagstream(void *threaddata) {
     state.monitorid = dst->params.monitorid;
     state.streamnum = dst->params.streamnum;
     state.sendbuf = NULL;
+    /* TODO allow this to be set, although it will trash performance. Note
+     * that this should not be set to non-zero if HAVE_LIBZ != 1, as we
+     * won't have any compression libraries available. */
+    state.compresslevel = 0;
 
     bottom = NULL;
     top = NULL;

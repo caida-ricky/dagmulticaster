@@ -1,3 +1,4 @@
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,7 +8,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
-
+#include <zlib.h>
 #include "ndagmulticaster.h"
 
 volatile int halted = 0;
@@ -108,6 +109,45 @@ static inline char *populate_common_header(char *bufstart,
     return bufstart + sizeof(ndag_common_t);
 }
 
+static inline uint32_t compress_erf_records(char *src, uint32_t len,
+        char *dst, int level) {
+
+    uint32_t compressed = 0;
+#if HAVE_LIBZ
+    z_stream strm;
+    int ret;
+
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    if (deflateInit(&strm, level) != Z_OK) {
+        fprintf(stderr, "Failed to init zlib.\n");
+        return 0;
+    }
+
+    strm.avail_in = len;
+    strm.next_in = src;
+    strm.avail_out = NDAG_MAX_DGRAM_SIZE;
+    strm.next_out = dst;
+
+    while (strm.avail_in > 0) {
+        int prevout = strm.avail_out;
+        ret = deflate(&strm, Z_NO_FLUSH);
+        if (ret != Z_OK) {
+            fprintf(stderr, "Error while compressing ERF records: %s\n",
+                    zError(ret));
+            compressed = 0;
+            break;
+        }
+        compressed += (prevout - strm.avail_out);
+    }
+
+    (void)deflateEnd(&strm);
+#endif
+    return compressed;
+}
+
 uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
         uint32_t tosend, uint16_t reccount) {
 
@@ -141,10 +181,26 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
         pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
     }
 
-    /* TODO add ability to compress the ERF records.
-     * Use 2nd MSB for indicating compression.
-     * Note: this may not play nicely with truncation?
+    /* XXX Compression has a massive performance impact, but I've left
+     * this option in regardless. Use at your own risk...
      */
+    if (params->compresslevel > 0) {
+        char *dest = params->sendbuf + sizeof(ndag_common_t) +
+                sizeof(ndag_encap_t);
+
+        tosend = compress_erf_records(buf, tosend, dest,
+                params->compresslevel);
+        if (tosend == 0) {
+            fprintf(stderr, "Error while trying to compress ERF records\n");
+            return 0;
+        }
+
+        pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
+
+        /* Use 2nd MSB for indicating compression. */
+        reccount |= 0x4000;
+    }
+
     encap->recordcount = ntohs(reccount);
 
     mhdr.msg_name = params->target->ai_addr;
@@ -158,7 +214,12 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
     sendbufs[0].iov_base = params->sendbuf;
     sendbufs[0].iov_len = sizeof(ndag_common_t) + sizeof(ndag_encap_t);
 
-    sendbufs[1].iov_base = buf;
+    if (params->compresslevel == 0) {
+        sendbufs[1].iov_base = buf;
+    } else {
+        sendbufs[1].iov_base = params->sendbuf + sizeof(ndag_common_t) +
+                sizeof(ndag_encap_t);
+    }
     sendbufs[1].iov_len = tosend;
 
     if (sendmsg(params->sock, &mhdr, 0) != pktsize) {
