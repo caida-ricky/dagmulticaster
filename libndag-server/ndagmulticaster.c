@@ -214,10 +214,11 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
 
 }
 
-
 void *ndag_start_beacon(void *params) {
 
     ndag_beacon_params_t *nparams = (ndag_beacon_params_t *)params;
+    ndag_common_t restarted;
+    char *unused = NULL;
     int beacsock;
     char *beaconrec = NULL;
     uint32_t beacsize = 0;
@@ -234,6 +235,17 @@ void *ndag_start_beacon(void *params) {
 
     if (targetinfo == NULL) {
         fprintf(stderr, "Failed to get addrinfo for nDAG beacon thread.\n");
+        goto endbeaconthread;
+    }
+
+    unused = populate_common_header((char *)(&restarted), nparams->monitorid,
+            NDAG_PKT_RESTARTED);
+
+    if (sendto(beacsock, (char *)(&restarted), sizeof(ndag_common_t), 0,
+            targetinfo->ai_addr, targetinfo->ai_addrlen) !=
+            sizeof(ndag_common_t)) {
+        fprintf(stderr, "Failed to send the nDAG restarted message: %s\n",
+                strerror(errno));
         goto endbeaconthread;
     }
 
