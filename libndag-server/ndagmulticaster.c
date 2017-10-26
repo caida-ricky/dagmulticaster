@@ -8,7 +8,11 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
+
+#if HAVE_ZLIB
 #include <zlib.h>
+#endif
+
 #include "ndagmulticaster.h"
 
 volatile int halted = 0;
