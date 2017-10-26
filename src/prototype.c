@@ -13,6 +13,7 @@
 
 #include <pthread.h>
 #include <dagapi.h>
+#include <dag_config_api.h>
 
 #include <numa.h>
 
@@ -56,16 +57,43 @@ static int get_nb_cores() {
         return numCPU <= 0 ? 1 : numCPU;
 }
 
-static inline int get_next_thread_cpu(uint8_t *cpumap, int numa) {
+static inline int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
+        uint16_t streamnum) {
 
-    int i;
+    int i, cpuid;
+    dag_card_ref_t cardref = NULL;
+    dag_component_t root = NULL;
+    dag_component_t streamconf = NULL;
+    attr_uuid_t any;
+    void *ptr;
+    mem_node_t *meminfo;
+
+    cardref = dag_config_init(dagdevname);
+    root = dag_config_get_root_component(cardref);
+    streamconf = dag_component_get_subcomponent(root, kComponentStream,
+            streamnum);
+
+    any = dag_component_get_attribute_uuid(streamconf,
+            kStructAttributeMemNode);
+
+    if (dag_config_get_struct_attribute(cardref, any, &ptr) != 0) {
+        cpuid = -1;
+        goto endcpucheck;
+    }
+
+    meminfo = (mem_node_t *)ptr;
+
     for (i = 1; i < get_nb_cores(); i++) {
-        if (numa_node_of_cpu(i) == numa && cpumap[i] == 0) {
+        if (numa_node_of_cpu(i) == meminfo->node && cpumap[i] == 0) {
             cpumap[i] = 1;
-            return i;
+            cpuid = i;
+            goto endcpucheck;
         }
     }
-    return -1;
+
+endcpucheck:
+    dag_config_dispose(cardref);
+    return cpuid;
 
 }
 
@@ -226,8 +254,7 @@ exitthread:
 }
 
 static int start_dag_thread(streamparams_t *params, int index,
-        dagstreamthread_t *nextslot, uint16_t firstport, uint8_t *cpumap,
-        int numanode) {
+        dagstreamthread_t *nextslot, uint16_t firstport, uint8_t *cpumap) {
 
     int ret, nextdagcpu;
 #ifdef __linux__
@@ -264,10 +291,14 @@ static int start_dag_thread(streamparams_t *params, int index,
         return 0;
     }
 
-    nextdagcpu = get_next_thread_cpu(cpumap, numanode);
+    nextdagcpu = get_next_thread_cpu(params->dagdevname, cpumap,
+            nextslot->params.streamnum);
     if (nextdagcpu == -1) {
         /* TODO better error handling */
-        fprintf(stderr, "Not enough CPUs for the number of threads requested?\n");
+        /* TODO allow users to decide that they want more than one stream per
+         * CPU */
+        fprintf(stderr,
+                "Not enough CPUs for the number of threads requested?\n");
         return -1;
     }
 
@@ -368,8 +399,11 @@ int main(int argc, char **argv) {
      *      dag device name
      *      monitor id
      *      beaconing port number
-     *      multicast address
+     *      multicast address/group
+     *      starting port for multicast (if not set, choose at random)
      *      compress output - yes/no?
+     *      max streams per core
+     *      interfaces to send multicast on
      *      anything else?
      */
 
@@ -381,6 +415,9 @@ int main(int argc, char **argv) {
     params.compressflag = 0;
     params.monitorid = 1;
 
+    /* This lets us do fast polling on the DAG card. Fast polls (< 2ms) will
+     * be implemented as busy-waits so there will be high CPU usage.
+     */
     schedparam.sched_priority = sched_get_priority_max(SCHED_RR);
     sched_setscheduler(0, SCHED_RR, &schedparam);
 
@@ -464,6 +501,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
         exit(1);
     }
+    params.dagdevname = dagdev;
     params.dagfd = dagfd;
     params.multicastgroup = multicastgroup;
     params.sourceaddr = sourceaddr;
@@ -472,8 +510,6 @@ int main(int argc, char **argv) {
     threadcount = 0;
     beaconer = (beaconthread_t *)malloc(sizeof(beaconthread_t));
     firstport = 10000 + (rand() % 50000);
-
-    
 
     while (!halted) {
         errorstate = 0;
@@ -501,12 +537,9 @@ int main(int argc, char **argv) {
 
         /* Create reading thread for each available stream */
 
-        /* TODO
-         *   determine the correct numa node for each rx stream.
-         */
         for (i = 0; i < maxstreams; i++) {
             ret = start_dag_thread(&params, i, &(dagthreads[threadcount]),
-                    firstport, cpumap, (i % 2));
+                    firstport, cpumap);
 
 
             if (ret < 0) {
@@ -567,6 +600,8 @@ int main(int argc, char **argv) {
 
         /* If we are paused, we want to wait here until we get the signal to
          * restart.
+         *
+         * TODO implement pausing and unpausing.
          */
         while (paused) {
             usleep(10000);
