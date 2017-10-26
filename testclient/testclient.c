@@ -500,6 +500,10 @@ static void *control_thread_run(void *threaddata) {
             break;
         }
 
+        if (!FD_ISSET(sock, &listening)) {
+            continue;
+        }
+
         ret = recvfrom(sock, buf, MAXBUFSIZE, 0, receiveaddr->ai_addr,
                 &(receiveaddr->ai_addrlen));
         if (ret < 0) {
