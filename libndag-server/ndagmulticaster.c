@@ -113,6 +113,8 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
 
     ndag_encap_t *encap;
     uint32_t pktsize = 0;
+    struct iovec sendbufs[2];
+    struct msghdr mhdr;
 
     if (params->sendbuf == NULL) {
         params->sendbuf = (char *)malloc(NDAG_MAX_DGRAM_SIZE +
@@ -145,17 +147,25 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
      */
     encap->recordcount = ntohs(reccount);
 
-    /* memcpy :( :( */
-    memcpy(((char *)encap) + sizeof(ndag_encap_t), buf, tosend);
+    mhdr.msg_name = params->target->ai_addr;
+    mhdr.msg_namelen = params->target->ai_addrlen;
+    mhdr.msg_iov = sendbufs;
+    mhdr.msg_iovlen = 2;
+    mhdr.msg_control = NULL;
+    mhdr.msg_controllen = 0;
+    mhdr.msg_flags = 0;
 
-    if (sendto(params->sock, params->sendbuf, pktsize, 0,
-                params->target->ai_addr,
-                params->target->ai_addrlen) != pktsize) {
+    sendbufs[0].iov_base = params->sendbuf;
+    sendbufs[0].iov_len = sizeof(ndag_common_t) + sizeof(ndag_encap_t);
+
+    sendbufs[1].iov_base = buf;
+    sendbufs[1].iov_len = tosend;
+
+    if (sendmsg(params->sock, &mhdr, 0) != pktsize) {
         fprintf(stderr, "Failed to send the full nDAG encap. record: %s\n",
                 strerror(errno));
         reccount = 0;
     }
-
     params->seqno += 1;
 
     return reccount;
@@ -204,10 +214,11 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
 
 }
 
-
 void *ndag_start_beacon(void *params) {
 
     ndag_beacon_params_t *nparams = (ndag_beacon_params_t *)params;
+    ndag_common_t restarted;
+    char *unused = NULL;
     int beacsock;
     char *beaconrec = NULL;
     uint32_t beacsize = 0;
@@ -224,6 +235,17 @@ void *ndag_start_beacon(void *params) {
 
     if (targetinfo == NULL) {
         fprintf(stderr, "Failed to get addrinfo for nDAG beacon thread.\n");
+        goto endbeaconthread;
+    }
+
+    unused = populate_common_header((char *)(&restarted), nparams->monitorid,
+            NDAG_PKT_RESTARTED);
+
+    if (sendto(beacsock, (char *)(&restarted), sizeof(ndag_common_t), 0,
+            targetinfo->ai_addr, targetinfo->ai_addrlen) !=
+            sizeof(ndag_common_t)) {
+        fprintf(stderr, "Failed to send the nDAG restarted message: %s\n",
+                strerror(errno));
         goto endbeaconthread;
     }
 

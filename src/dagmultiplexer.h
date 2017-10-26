@@ -18,6 +18,7 @@ typedef struct streamparams {
     uint8_t compressflag;
     char *multicastgroup;
     char *sourceaddr;
+    char *dagdevname;
 } streamparams_t;
 
 typedef struct dsthread {

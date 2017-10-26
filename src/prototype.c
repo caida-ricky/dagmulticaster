@@ -13,6 +13,9 @@
 
 #include <pthread.h>
 #include <dagapi.h>
+#include <dag_config_api.h>
+
+#include <numa.h>
 
 #include "dagmultiplexer.h"
 #include "ndagmulticaster.h"
@@ -54,18 +57,66 @@ static int get_nb_cores() {
         return numCPU <= 0 ? 1 : numCPU;
 }
 
+static inline int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
+        uint16_t streamnum) {
+
+    int i, cpuid;
+    dag_card_ref_t cardref = NULL;
+    dag_component_t root = NULL;
+    dag_component_t streamconf = NULL;
+    attr_uuid_t any;
+    void *ptr;
+    mem_node_t *meminfo;
+
+    cardref = dag_config_init(dagdevname);
+    root = dag_config_get_root_component(cardref);
+    streamconf = dag_component_get_subcomponent(root, kComponentStream,
+            streamnum);
+
+    any = dag_component_get_attribute_uuid(streamconf,
+            kStructAttributeMemNode);
+
+    if (dag_config_get_struct_attribute(cardref, any, &ptr) != 0) {
+        cpuid = -1;
+        goto endcpucheck;
+    }
+
+    meminfo = (mem_node_t *)ptr;
+
+    for (i = 1; i < get_nb_cores(); i++) {
+        if (numa_node_of_cpu(i) == meminfo->node && cpumap[i] == 0) {
+            cpumap[i] = 1;
+            cpuid = i;
+            goto endcpucheck;
+        }
+    }
+
+endcpucheck:
+    dag_config_dispose(cardref);
+    return cpuid;
+
+}
+
 static uint32_t walk_stream_buffer(char *bottom, char *top,
-        uint16_t *reccount) {
+        uint16_t *reccount, uint16_t streamnum) {
 
     uint32_t walked = 0;
 
     while (bottom < top && walked < NDAG_MAX_DGRAM_SIZE) {
         dag_record_t *erfhdr = (dag_record_t *)bottom;
         uint16_t len = ntohs(erfhdr->rlen);
+        uint16_t lctr = ntohs(erfhdr->lctr);
 
         if (walked > 0 && walked + len > NDAG_MAX_DGRAM_SIZE) {
             /* Current record would push us over the end of our datagram */
             break;
+        }
+
+        if (lctr != 0) {
+            fprintf(stderr, "Loss counter for stream %u is %u\n", streamnum,
+                    lctr);
+            halted = 1;
+            return 0;
         }
 
         walked += len;
@@ -93,6 +144,7 @@ static void *per_dagstream(void *threaddata) {
     int sock = -1;
     uint64_t allrecords = 0;
     struct addrinfo *targetinfo = NULL;
+    struct timeval timetaken, starttime, endtime;
 
     /* Set polling parameters
      * TODO: are these worth making configurable?
@@ -139,6 +191,7 @@ static void *per_dagstream(void *threaddata) {
     top = NULL;
 
     fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
+    gettimeofday(&starttime, NULL);
 
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
@@ -158,7 +211,7 @@ static void *per_dagstream(void *threaddata) {
          *      up with too much data to fit in one datagram.
          */
         available = walk_stream_buffer((char *)bottom, (char *)top,
-                &records_walked);
+                &records_walked, dst->params.streamnum);
         allrecords += records_walked;
         if (available > 0) {
             if (ndag_send_encap_records(&state, (char *)bottom, available,
@@ -169,13 +222,16 @@ static void *per_dagstream(void *threaddata) {
         bottom += available;
     }
 
+    gettimeofday(&endtime, NULL);
     if (state.sendbuf) {
         free(state.sendbuf);
     }
 
+    timersub(&endtime, &starttime, &timetaken);
     /* Close socket */
-    fprintf(stderr, "Halting stream %d after processing %lu records\n",
-            dst->params.streamnum, allrecords);
+    fprintf(stderr, "Halting stream %d after processing %lu records in %d.%d seconds\n",
+            dst->params.streamnum, allrecords, timetaken.tv_sec,
+            timetaken.tv_usec);
 
     /* Stop stream */
 stopstream:
@@ -198,9 +254,9 @@ exitthread:
 }
 
 static int start_dag_thread(streamparams_t *params, int index,
-        dagstreamthread_t *nextslot, uint16_t firstport) {
+        dagstreamthread_t *nextslot, uint16_t firstport, uint8_t *cpumap) {
 
-    int ret;
+    int ret, nextdagcpu;
 #ifdef __linux__
     pthread_attr_t attrib;
     cpu_set_t cpus;
@@ -235,14 +291,23 @@ static int start_dag_thread(streamparams_t *params, int index,
         return 0;
     }
 
+    nextdagcpu = get_next_thread_cpu(params->dagdevname, cpumap,
+            nextslot->params.streamnum);
+    if (nextdagcpu == -1) {
+        /* TODO better error handling */
+        /* TODO allow users to decide that they want more than one stream per
+         * CPU */
+        fprintf(stderr,
+                "Not enough CPUs for the number of threads requested?\n");
+        return -1;
+    }
+
 
 #ifdef __linux__
 
-	/* Allow this thread to appear on any core */
+	/* Control which core this thread is bound to */
     CPU_ZERO(&cpus);
-    for (i = 0; i < get_nb_cores(); i++) {
-		CPU_SET(i, &cpus);
-	}
+    CPU_SET(nextdagcpu, &cpus);
     pthread_attr_init(&attrib);
     pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
     ret = pthread_create(&nextslot->tid, &attrib, per_dagstream,
@@ -275,11 +340,9 @@ int create_multiplex_beaconer(beaconthread_t *bthread) {
 
 #ifdef __linux__
 
-	/* Allow this thread to appear on any core */
+	/* This thread is low impact so can be bound to core 0 */
     CPU_ZERO(&cpus);
-    for (i = 0; i < get_nb_cores(); i++) {
-		CPU_SET(i, &cpus);
-	}
+	CPU_SET(0, &cpus);
     pthread_attr_init(&attrib);
     pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
     ret = pthread_create(&(bthread->tid), &attrib, ndag_start_beacon,
@@ -322,15 +385,25 @@ int main(int argc, char **argv) {
     sigset_t sig_before, sig_block_all;
     uint16_t firstport;
 
+    uint8_t *cpumap = NULL;
+
+    struct sched_param schedparam;
+
     srand((unsigned) time(&t));
+
+    cpumap = (uint8_t *)malloc(sizeof(uint8_t) * get_nb_cores());
+    memset(cpumap, 0, sizeof(uint8_t) * get_nb_cores());
 
     /* Process user config options */
     /*  options:
      *      dag device name
      *      monitor id
      *      beaconing port number
-     *      multicast address
+     *      multicast address/group
+     *      starting port for multicast (if not set, choose at random)
      *      compress output - yes/no?
+     *      max streams per core
+     *      interfaces to send multicast on
      *      anything else?
      */
 
@@ -341,6 +414,12 @@ int main(int argc, char **argv) {
 
     params.compressflag = 0;
     params.monitorid = 1;
+
+    /* This lets us do fast polling on the DAG card. Fast polls (< 2ms) will
+     * be implemented as busy-waits so there will be high CPU usage.
+     */
+    schedparam.sched_priority = sched_get_priority_max(SCHED_RR);
+    sched_setscheduler(0, SCHED_RR, &schedparam);
 
     while (1) {
         int option_index = 0;
@@ -422,6 +501,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
         exit(1);
     }
+    params.dagdevname = dagdev;
     params.dagfd = dagfd;
     params.multicastgroup = multicastgroup;
     params.sourceaddr = sourceaddr;
@@ -456,9 +536,10 @@ int main(int argc, char **argv) {
         }
 
         /* Create reading thread for each available stream */
+
         for (i = 0; i < maxstreams; i++) {
             ret = start_dag_thread(&params, i, &(dagthreads[threadcount]),
-                    firstport);
+                    firstport, cpumap);
 
 
             if (ret < 0) {
@@ -519,6 +600,8 @@ int main(int argc, char **argv) {
 
         /* If we are paused, we want to wait here until we get the signal to
          * restart.
+         *
+         * TODO implement pausing and unpausing.
          */
         while (paused) {
             usleep(10000);
