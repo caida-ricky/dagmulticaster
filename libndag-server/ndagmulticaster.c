@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <unistd.h>
 
-#if HAVE_ZLIB
+#if HAVE_LIBZ
 #include <zlib.h>
 #endif
 
@@ -31,6 +31,8 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
     char portstr[16];
     int sock;
     uint32_t ttl = 1;       /* TODO make this configurable */
+    uint32_t disable = 0;
+    int bufsize;
 
     hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
@@ -84,6 +86,30 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
         sock = -1;
         goto sockcreateover;
     }
+
+    if (setsockopt(sock,
+            source->ai_family == PF_INET6 ? IPPROTO_IPV6: IPPROTO_IP,
+            source->ai_family == PF_INET6 ? IPV6_MULTICAST_LOOP: IP_MULTICAST_LOOP,
+            &disable, sizeof(disable)) != 0) {
+        fprintf(stderr,
+                "nDAG: Failed to disable looping on multicast interface %s -- %s\n",
+                srcaddr, strerror(errno));
+        close(sock);
+        sock = -1;
+        goto sockcreateover;
+    }
+
+    bufsize = 16 * 1024 * 1024;
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize,
+                (socklen_t)sizeof(int)) != 0) {
+        fprintf(stderr,
+                "nDAG: Failed to increase buffer size on multicast interface %s -- %s\n",
+                srcaddr, strerror(errno));
+        close(sock);
+        sock = -1;
+        goto sockcreateover;
+    }
+
 
 sockcreateover:
     freeaddrinfo(source);
