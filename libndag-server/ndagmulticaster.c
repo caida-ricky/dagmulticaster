@@ -268,6 +268,24 @@ int ndag_send_encap_libtrace(int sock, libtrace_packet_t *packet) {
     return 1;
 }
 
+int ndag_send_keepalive(ndag_encap_params_t *params) {
+
+    char *alive = (char *)malloc(sizeof(ndag_common_t));
+    char *next;
+
+    next = populate_common_header(alive, params->monitorid, NDAG_PKT_KEEPALIVE);
+
+    if (sendto(params->sock, alive, sizeof(ndag_common_t), 0,
+            params->target->ai_addr, params->target->ai_addrlen) !=
+            sizeof(ndag_common_t)) {
+        fprintf(stderr, "Failed to send an nDAG keep alive message: %s\n",
+                strerror(errno));
+        return -1;
+    }
+
+    return 1;
+}
+
 
 static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
 

@@ -145,6 +145,7 @@ static void *per_dagstream(void *threaddata) {
     uint64_t allrecords = 0;
     struct addrinfo *targetinfo = NULL;
     struct timeval timetaken, starttime, endtime;
+    uint32_t idletime = 0;
 
     /* Set polling parameters
      * TODO: are these worth making configurable?
@@ -218,9 +219,19 @@ static void *per_dagstream(void *threaddata) {
                 &records_walked, dst->params.streamnum);
         allrecords += records_walked;
         if (available > 0) {
+            idletime = 0;
             if (ndag_send_encap_records(&state, (char *)bottom, available,
                     records_walked) == 0) {
                 break;
+            }
+        } else {
+            idletime += DAG_POLL_MAXWAIT;
+
+            if (idletime > 5 * 1000000) {
+                if (ndag_send_keepalive(&state) < 0) {
+                    break;
+                }
+                idletime = 0;
             }
         }
         bottom += available;

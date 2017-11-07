@@ -39,6 +39,7 @@ enum {
     NDAG_PKT_ENCAPERF = 0x02,
     NDAG_PKT_RESTARTED = 0x03,
     NDAG_PKT_ENCAPRT = 0x04,
+    NDAG_PKT_KEEPALIVE = 0x05,
 };
 
 /* == Protocol header structures == */
@@ -74,6 +75,7 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
 void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo);
 uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
         uint32_t tosend, uint16_t reccount);
+int ndag_send_keepalive(ndag_encap_params_t *params);
 int ndag_send_encap_libtrace(int sock, libtrace_packet_t *packet);
 
 
