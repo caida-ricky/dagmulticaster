@@ -338,14 +338,15 @@ static void *receiver_thread_run(void *threaddata) {
                 case NDAG_CLIENT_HALT:
                     threadhalted = 1;
                     break;
+                /*
                 case NDAG_CLIENT_RESTARTED:
-                    /* TODO do something about this? */
                     if (any_restarted_sources(msg.contents.monitor, rt)) {
                         fprintf(stderr,
                                 "Upstream monitor %u indicates that it has restarted. Packets may have been lost.\n",
                                 msg.contents.monitor);
                     }
                     break;
+                */
                 case NDAG_CLIENT_NEWGROUP:
                     if (add_new_streamsock(rt, msg.contents) < 0) {
                         fprintf(stderr,
@@ -437,8 +438,8 @@ static int parse_control_message(char *msgbuf, int msgsize,
 
             ptr ++;
         }
+    /*
     } else if (msgtype == NDAG_PKT_RESTARTED) {
-        /* If message is a restart, push that to all active message queues. */
         alert.type = NDAG_CLIENT_RESTARTED;
         alert.contents.monitor = ntohs(ndaghdr->monitorid);
         alert.contents.groupaddr = NULL;
@@ -449,7 +450,7 @@ static int parse_control_message(char *msgbuf, int msgsize,
                     (void *)&alert);
         }
 
-
+    */
     } else {
         fprintf(stderr, "Unexpected message type on control channel: %u\n",
                 msgtype);

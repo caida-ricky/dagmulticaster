@@ -13,6 +13,7 @@
 #include <zlib.h>
 #endif
 
+#include "byteswap.h"
 #include "ndagmulticaster.h"
 
 volatile int halted = 0;
@@ -126,6 +127,7 @@ void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo) {
     }
 }
 
+
 static inline char *populate_common_header(char *bufstart,
         uint16_t monitorid, uint8_t pkttype) {
 
@@ -140,7 +142,7 @@ static inline char *populate_common_header(char *bufstart,
 }
 
 static inline uint32_t compress_erf_records(char *src, uint32_t len,
-        char *dst, int level) {
+        char *dst, int level, uint16_t dstsize) {
 
     uint32_t compressed = 0;
 #if HAVE_LIBZ
@@ -158,7 +160,7 @@ static inline uint32_t compress_erf_records(char *src, uint32_t len,
 
     strm.avail_in = len;
     strm.next_in = src;
-    strm.avail_out = NDAG_MAX_DGRAM_SIZE;
+    strm.avail_out = dstsize;
     strm.next_out = dst;
 
     while (strm.avail_in > 0) {
@@ -187,8 +189,7 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
     struct msghdr mhdr;
 
     if (params->sendbuf == NULL) {
-        params->sendbuf = (char *)malloc(NDAG_MAX_DGRAM_SIZE +
-                sizeof(ndag_common_t) + sizeof(ndag_encap_t));
+        params->sendbuf = (char *)malloc(params->maxdgramsize);
     }
 
     if (params->sendbuf == NULL) {
@@ -198,15 +199,17 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
 
     encap = (ndag_encap_t *)(populate_common_header(params->sendbuf,
             params->monitorid, NDAG_PKT_ENCAPERF));
+    encap->started = bswap_host_to_be64(params->starttime);
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
 
-    if (tosend > NDAG_MAX_DGRAM_SIZE) {
+    if (tosend + sizeof(ndag_encap_t) + sizeof(ndag_common_t) >
+                params->maxdgramsize) {
         /* Use MSB for indicating truncation */
         reccount |= 0x8000;
-        pktsize = NDAG_MAX_DGRAM_SIZE + sizeof(ndag_common_t) +
+        pktsize = params->maxdgramsize;
+        tosend = params->maxdgramsize - sizeof(ndag_common_t) -
                 sizeof(ndag_encap_t);
-        tosend = NDAG_MAX_DGRAM_SIZE;
     } else {
         pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
     }
@@ -219,7 +222,7 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
                 sizeof(ndag_encap_t);
 
         tosend = compress_erf_records(buf, tosend, dest,
-                params->compresslevel);
+                params->compresslevel, params->maxdgramsize);
         if (tosend == 0) {
             fprintf(stderr, "Error while trying to compress ERF records\n");
             return 0;
@@ -257,7 +260,11 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
                 strerror(errno));
         reccount = 0;
     }
+
     params->seqno += 1;
+    if (params->seqno == 0) {
+        params->seqno ++;
+    }
 
     return reccount;
 }
@@ -344,17 +351,6 @@ void *ndag_start_beacon(void *params) {
 
     if (targetinfo == NULL) {
         fprintf(stderr, "Failed to get addrinfo for nDAG beacon thread.\n");
-        goto endbeaconthread;
-    }
-
-    unused = populate_common_header((char *)(&restarted), nparams->monitorid,
-            NDAG_PKT_RESTARTED);
-
-    if (sendto(beacsock, (char *)(&restarted), sizeof(ndag_common_t), 0,
-            targetinfo->ai_addr, targetinfo->ai_addrlen) !=
-            sizeof(ndag_common_t)) {
-        fprintf(stderr, "Failed to send the nDAG restarted message: %s\n",
-                strerror(errno));
         goto endbeaconthread;
     }
 

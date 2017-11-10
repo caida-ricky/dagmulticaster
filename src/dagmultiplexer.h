@@ -19,6 +19,8 @@ typedef struct streamparams {
     char *multicastgroup;
     char *sourceaddr;
     char *dagdevname;
+    uint64_t globalstart;
+    uint16_t mtu;
 } streamparams_t;
 
 typedef struct dsthread {

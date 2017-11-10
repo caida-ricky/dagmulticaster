@@ -5,7 +5,14 @@
 #include <sys/types.h>
 #include <libtrace.h>
 
-#define NDAG_MAX_DGRAM_SIZE (8900)
+/* Maximum size for non-encapsulated messages (e.g. beacons or
+ * keepalives).
+ *
+ * Maximum size for encapsulated messages (e.g. encap ERF) is set
+ * via ndag_encap_params_t, can be a different value (but should be
+ * less than your MTU!) and should be configurable by the user.
+ */
+#define NDAG_MAX_DGRAM_SIZE (1400)
 
 #define NDAG_MAGIC_NUMBER (0x4E444147)
 #define NDAG_EXPORT_VERSION 1
@@ -32,12 +39,14 @@ typedef struct ndagencapparams {
     struct addrinfo *target;
     char *sendbuf;
     int compresslevel;
+    uint64_t starttime;
+    uint16_t maxdgramsize;
 } ndag_encap_params_t;
 
 enum {
     NDAG_PKT_BEACON = 0x01,
     NDAG_PKT_ENCAPERF = 0x02,
-    NDAG_PKT_RESTARTED = 0x03,
+    //NDAG_PKT_RESTARTED = 0x03,
     NDAG_PKT_ENCAPRT = 0x04,
     NDAG_PKT_KEEPALIVE = 0x05,
 };
@@ -63,6 +72,7 @@ typedef struct ndag_common_header {
 
 /* Encapsulation header -- used by both ENCAPERF and ENCAPRT records */
 typedef struct ndag_encap {
+    uint64_t started;
     uint32_t seqno;
     uint16_t streamid;
     uint16_t recordcount; /* acts as RT type for ENCAPRT records */

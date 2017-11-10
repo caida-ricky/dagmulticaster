@@ -20,6 +20,8 @@
 #include "dagmultiplexer.h"
 #include "ndagmulticaster.h"
 
+#define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
+
 int threadcount = 0;
 volatile int halted = 0;
 volatile int paused = 0;
@@ -57,7 +59,7 @@ static int get_nb_cores() {
         return numCPU <= 0 ? 1 : numCPU;
 }
 
-static inline int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
+static int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
         uint16_t streamnum) {
 
     int i, cpuid;
@@ -98,16 +100,16 @@ endcpucheck:
 }
 
 static uint32_t walk_stream_buffer(char *bottom, char *top,
-        uint16_t *reccount, uint16_t streamnum) {
+        uint16_t *reccount, uint16_t streamnum, uint16_t maxsize) {
 
     uint32_t walked = 0;
 
-    while (bottom < top && walked < NDAG_MAX_DGRAM_SIZE) {
+    while (bottom < top && walked < maxsize) {
         dag_record_t *erfhdr = (dag_record_t *)bottom;
         uint16_t len = ntohs(erfhdr->rlen);
         uint16_t lctr = ntohs(erfhdr->lctr);
 
-        if (walked > 0 && walked + len > NDAG_MAX_DGRAM_SIZE) {
+        if (walked > 0 && walked + len > maxsize) {
             /* Current record would push us over the end of our datagram */
             break;
         }
@@ -124,7 +126,7 @@ static uint32_t walk_stream_buffer(char *bottom, char *top,
         (*reccount)++;
     }
 
-    /* walked can be larger than NDAG_MAX_DGRAM_SIZE if the first record is
+    /* walked can be larger than maxsize if the first record is
      * very large. This is intentional; the multicaster will truncate the
      * packet record if it is too big and set the truncation flag.
      */
@@ -142,10 +144,16 @@ static void *per_dagstream(void *threaddata) {
     void *bottom, *top;
     uint32_t available = 0;
     int sock = -1;
+    int oldcancel;
     uint64_t allrecords = 0;
     struct addrinfo *targetinfo = NULL;
-    struct timeval timetaken, starttime, endtime;
+    struct timeval timetaken, endtime, starttime;
     uint32_t idletime = 0;
+
+    if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldcancel) != 0) {
+        strerror(errno);
+        goto exitthread;
+    }
 
     /* Set polling parameters
      * TODO: are these worth making configurable?
@@ -186,18 +194,21 @@ static void *per_dagstream(void *threaddata) {
     state.seqno = 1;
     state.monitorid = dst->params.monitorid;
     state.streamnum = dst->params.streamnum;
+    state.starttime = dst->params.globalstart;
     state.sendbuf = NULL;
+    state.maxdgramsize = dst->params.mtu;
     /* TODO allow this to be set, although it will trash performance. Note
      * that this should not be set to non-zero if HAVE_LIBZ != 1, as we
      * won't have any compression libraries available. */
     state.compresslevel = 0;
 
+
     bottom = NULL;
     top = NULL;
 
     fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
+    fprintf(stderr, "%016x\n", state.starttime);
     gettimeofday(&starttime, NULL);
-
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
         uint16_t records_walked = 0;
@@ -216,7 +227,9 @@ static void *per_dagstream(void *threaddata) {
          *      up with too much data to fit in one datagram.
          */
         available = walk_stream_buffer((char *)bottom, (char *)top,
-                &records_walked, dst->params.streamnum);
+                &records_walked, dst->params.streamnum,
+                dst->params.mtu - ENCAP_OVERHEAD);
+
         allrecords += records_walked;
         if (available > 0) {
             idletime = 0;
@@ -382,7 +395,8 @@ void print_help(char *progname) {
 
     fprintf(stderr,
         "Usage: %s [ -d dagdevice ] [ -p beaconport ] [ -m monitorid ] [ -c ]\n"
-        "          [ -a multicastaddress ] [ -s sourceaddress ]\n", progname);
+        "          [ -a multicastaddress ] [ -s sourceaddress ]\n"
+        "          [ -M exportmtu ]\n", progname);
 
 }
 
@@ -395,10 +409,12 @@ int main(int argc, char **argv) {
     dagstreamthread_t *dagthreads = NULL;
     beaconthread_t *beaconer = NULL;
     uint16_t beaconport = 9001;
+    uint16_t mtu = 1400;
     time_t t;
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     uint16_t firstport;
+    struct timeval starttime;
 
     uint8_t *cpumap = NULL;
 
@@ -447,10 +463,11 @@ int main(int argc, char **argv) {
             { "compress", 0, 0, 'c' },
             { "groupaddr", 1, 0, 'a' },
             { "sourceaddr", 1, 0, 's' },
+            { "mtu", 1, 0, 'M' },
             { NULL, 0, 0, 0 }
         };
 
-        c = getopt_long(argc, argv, "a:s:d:hm:p:c", long_options,
+        c = getopt_long(argc, argv, "a:s:d:hm:M:p:c", long_options,
                 &option_index);
         if (c == -1)
             break;
@@ -473,6 +490,9 @@ int main(int argc, char **argv) {
                 break;
             case 's':
                 sourceaddr = strdup(optarg);
+                break;
+            case 'M':
+                mtu = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
                 break;
             case 'h':
             default:
@@ -507,6 +527,12 @@ int main(int argc, char **argv) {
             "Warning: no source address specified. Using default interface.");
         sourceaddr = strdup("0.0.0.0");
     }
+    if (params.monitorid == 0) {
+        fprintf(stderr,
+            "0 is not a valid monitor ID -- choose another number.\n");
+        goto finalcleanup;
+    }
+
 
     /* Open DAG card */
     fprintf(stderr, "Attempting to open DAG device: %s\n", dagdev);
@@ -514,13 +540,17 @@ int main(int argc, char **argv) {
     dagfd = dag_open(dagdev);
     if (dagfd < 0) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
-        exit(1);
+        goto finalcleanup;
     }
     params.dagdevname = dagdev;
     params.dagfd = dagfd;
     params.multicastgroup = multicastgroup;
     params.sourceaddr = sourceaddr;
+    params.mtu = mtu;
 
+    gettimeofday(&starttime, NULL);
+    params.globalstart = ((starttime.tv_sec - 1509494400) * 1000) +
+            (starttime.tv_usec / 1000.0);
     halted = 0;
     threadcount = 0;
     beaconer = (beaconthread_t *)malloc(sizeof(beaconthread_t));
@@ -644,6 +674,7 @@ halteverything:
     /* Close DAG card */
     dag_close(dagfd);
 
+finalcleanup:
     free(dagdev);
     free(multicastgroup);
     free(sourceaddr);
