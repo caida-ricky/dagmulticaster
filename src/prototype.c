@@ -207,7 +207,6 @@ static void *per_dagstream(void *threaddata) {
     top = NULL;
 
     fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
-    fprintf(stderr, "%016x\n", state.starttime);
     gettimeofday(&starttime, NULL);
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
