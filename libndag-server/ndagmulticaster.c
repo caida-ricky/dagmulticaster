@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "config.h"
 
 #include <stdio.h>
@@ -127,6 +129,58 @@ void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo) {
     }
 }
 
+void ndag_init_encap(ndag_encap_params_t *params, int sock,
+        struct addrinfo *targetinfo, uint16_t monitorid, uint16_t streamid,
+        uint64_t start, uint16_t mtu, int compress) {
+
+    int i;
+
+    params->sock = sock;
+    params->target = targetinfo;
+    params->streamnum = streamid;
+    params->seqno = 1;
+    params->compresslevel = compress;
+    params->starttime = start;
+    params->maxdgramsize = mtu;
+    params->mmsgbufs = (struct mmsghdr *)malloc(sizeof(struct mmsghdr)
+            * NDAG_BATCH_SIZE);
+
+    for (i = 0; i < NDAG_BATCH_SIZE; i++) {
+        params->headerspace[i] = (char *)malloc(NDAG_MAX_DGRAM_SIZE);
+        params->mmsgbufs[i].msg_hdr.msg_iov = (struct iovec *)malloc(
+                sizeof(struct iovec) * 2);
+    }
+
+}
+
+void ndag_destroy_encap(ndag_encap_params_t *params) {
+    int i;
+
+    for (i = 0; i < NDAG_BATCH_SIZE; i++) {
+        free(params->headerspace[i]);
+        free(params->mmsgbufs[i].msg_hdr.msg_iov);
+    }
+    free(params->mmsgbufs);
+}
+
+void ndag_reset_encap_state(ndag_encap_params_t *params) {
+
+    int i;
+
+    for (i = 0; i < NDAG_BATCH_SIZE; i++) {
+        params->mmsgbufs[i].msg_len = 0;
+        params->mmsgbufs[i].msg_hdr.msg_name = params->target->ai_addr;
+        params->mmsgbufs[i].msg_hdr.msg_namelen = params->target->ai_addrlen;
+        params->mmsgbufs[i].msg_hdr.msg_iov[0].iov_base = NULL;
+        params->mmsgbufs[i].msg_hdr.msg_iov[0].iov_len = 0;
+        params->mmsgbufs[i].msg_hdr.msg_iov[1].iov_base = NULL;
+        params->mmsgbufs[i].msg_hdr.msg_iov[1].iov_len = 0;
+        params->mmsgbufs[i].msg_hdr.msg_iovlen = 0;
+        params->mmsgbufs[i].msg_hdr.msg_control = NULL;
+        params->mmsgbufs[i].msg_hdr.msg_controllen = 0;
+        params->mmsgbufs[i].msg_hdr.msg_flags = 0;
+    }
+}
 
 static inline char *populate_common_header(char *bufstart,
         uint16_t monitorid, uint8_t pkttype) {
@@ -180,28 +234,18 @@ static inline uint32_t compress_erf_records(char *src, uint32_t len,
     return compressed;
 }
 
-uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
-        uint32_t tosend, uint16_t reccount) {
+uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
+        uint32_t tosend, uint16_t reccount, int index) {
 
     ndag_encap_t *encap;
     uint32_t pktsize = 0;
-    struct iovec sendbufs[2];
-    struct msghdr mhdr;
 
-    if (params->sendbuf == NULL) {
-        params->sendbuf = (char *)malloc(params->maxdgramsize);
-    }
-
-    if (params->sendbuf == NULL) {
-        fprintf(stderr, "Failed to allocate memory for nDAG encap. ERF!\n");
-        return 0;
-    }
-
-    encap = (ndag_encap_t *)(populate_common_header(params->sendbuf,
+    encap = (ndag_encap_t *)(populate_common_header(params->headerspace[index],
             params->monitorid, NDAG_PKT_ENCAPERF));
-    encap->started = bswap_host_to_be64(params->starttime);
+    encap->started = params->starttime;
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
+    encap->recordcount = ntohs(reccount);
 
     if (tosend + sizeof(ndag_encap_t) + sizeof(ndag_common_t) >
                 params->maxdgramsize) {
@@ -218,7 +262,7 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
      * this option in regardless. Use at your own risk...
      */
     if (params->compresslevel > 0) {
-        char *dest = params->sendbuf + sizeof(ndag_common_t) +
+        char *dest = params->headerspace[index] + sizeof(ndag_common_t) +
                 sizeof(ndag_encap_t);
 
         tosend = compress_erf_records(buf, tosend, dest,
@@ -232,38 +276,41 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
 
         /* Use 2nd MSB for indicating compression. */
         reccount |= 0x4000;
-    }
+        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
+                params->headerspace[index];
+        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_len = pktsize;
+        params->mmsgbufs[index].msg_hdr.msg_iovlen = 1;
 
-    encap->recordcount = ntohs(reccount);
-
-    mhdr.msg_name = params->target->ai_addr;
-    mhdr.msg_namelen = params->target->ai_addrlen;
-    mhdr.msg_iov = sendbufs;
-    mhdr.msg_iovlen = 2;
-    mhdr.msg_control = NULL;
-    mhdr.msg_controllen = 0;
-    mhdr.msg_flags = 0;
-
-    sendbufs[0].iov_base = params->sendbuf;
-    sendbufs[0].iov_len = sizeof(ndag_common_t) + sizeof(ndag_encap_t);
-
-    if (params->compresslevel == 0) {
-        sendbufs[1].iov_base = buf;
     } else {
-        sendbufs[1].iov_base = params->sendbuf + sizeof(ndag_common_t) +
-                sizeof(ndag_encap_t);
-    }
-    sendbufs[1].iov_len = tosend;
+        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
+                params->headerspace[index];
+        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_len =
+                sizeof(ndag_common_t) + sizeof(ndag_encap_t);
+        params->mmsgbufs[index].msg_hdr.msg_iov[1].iov_base = buf;
+        params->mmsgbufs[index].msg_hdr.msg_iov[1].iov_len = tosend;
+        params->mmsgbufs[index].msg_hdr.msg_iovlen = 2;
 
-    if (sendmsg(params->sock, &mhdr, 0) != pktsize) {
-        fprintf(stderr, "Failed to send the full nDAG encap. record: %s\n",
-                strerror(errno));
-        reccount = 0;
     }
 
     params->seqno += 1;
     if (params->seqno == 0) {
         params->seqno ++;
+    }
+
+    return reccount;
+}
+
+uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount) {
+    int reccount = msgcount;
+
+    if (msgcount == 0) {
+        return 0;
+    }
+
+    if (sendmmsg(params->sock, params->mmsgbufs, msgcount, 0) != msgcount) {
+        fprintf(stderr, "Failed to send nDAG encap. records: %s\n",
+                strerror(errno));
+        reccount = 0;
     }
 
     return reccount;
@@ -289,6 +336,7 @@ int ndag_send_keepalive(ndag_encap_params_t *params) {
                 strerror(errno));
         return -1;
     }
+    free(alive);
 
     return 1;
 }

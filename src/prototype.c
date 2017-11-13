@@ -144,7 +144,7 @@ static void *per_dagstream(void *threaddata) {
     void *bottom, *top;
     uint32_t available = 0;
     int sock = -1;
-    int oldcancel;
+    int oldcancel, i;
     uint64_t allrecords = 0;
     struct addrinfo *targetinfo = NULL;
     struct timeval timetaken, endtime, starttime;
@@ -189,18 +189,13 @@ static void *per_dagstream(void *threaddata) {
         goto stopstream;
     }
 
-    state.sock = sock;
-    state.target = targetinfo;
-    state.seqno = 1;
-    state.monitorid = dst->params.monitorid;
-    state.streamnum = dst->params.streamnum;
-    state.starttime = dst->params.globalstart;
-    state.sendbuf = NULL;
-    state.maxdgramsize = dst->params.mtu;
-    /* TODO allow this to be set, although it will trash performance. Note
-     * that this should not be set to non-zero if HAVE_LIBZ != 1, as we
+    /* TODO allow compress level to be set, although it will trash performance.
+     * Note that this should not be set to non-zero if HAVE_LIBZ != 1, as we
      * won't have any compression libraries available. */
-    state.compresslevel = 0;
+
+    ndag_init_encap(&state, sock, targetinfo, dst->params.monitorid,
+            dst->params.streamnum, dst->params.globalstart, dst->params.mtu,
+            0);
 
 
     bottom = NULL;
@@ -211,6 +206,8 @@ static void *per_dagstream(void *threaddata) {
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
         uint16_t records_walked = 0;
+        int savedtosend = 0;
+
         top = dag_advance_stream(dst->params.dagfd, dst->params.streamnum,
                 (uint8_t **)(&bottom));
         if (top == NULL) {
@@ -219,24 +216,7 @@ static void *per_dagstream(void *threaddata) {
             break;
         }
 
-        /* Sadly, we have to walk whatever dag_advance_stream gives us because
-         *   a) top is not guaranteed to be on a packet boundary.
-         *   b) there is no way to put an upper limit on the amount of bytes
-         *      that top is moved forward, so we can't guarantee we won't end
-         *      up with too much data to fit in one datagram.
-         */
-        available = walk_stream_buffer((char *)bottom, (char *)top,
-                &records_walked, dst->params.streamnum,
-                dst->params.mtu - ENCAP_OVERHEAD);
-
-        allrecords += records_walked;
-        if (available > 0) {
-            idletime = 0;
-            if (ndag_send_encap_records(&state, (char *)bottom, available,
-                    records_walked) == 0) {
-                break;
-            }
-        } else {
+        if (bottom == top) {
             idletime += DAG_POLL_MAXWAIT;
 
             if (idletime > 5 * 1000000) {
@@ -245,14 +225,46 @@ static void *per_dagstream(void *threaddata) {
                 }
                 idletime = 0;
             }
+            continue;
         }
-        bottom += available;
+
+        ndag_reset_encap_state(&state);
+        /* Sadly, we have to walk whatever dag_advance_stream gives us because
+         *   a) top is not guaranteed to be on a packet boundary.
+         *   b) there is no way to put an upper limit on the amount of bytes
+         *      that top is moved forward, so we can't guarantee we won't end
+         *      up with too much data to fit in one datagram.
+         */
+        do {
+            available = walk_stream_buffer((char *)bottom, (char *)top,
+                &records_walked, dst->params.streamnum,
+                dst->params.mtu - ENCAP_OVERHEAD);
+
+            allrecords += records_walked;
+            if (available > 0) {
+                idletime = 0;
+
+                if (ndag_push_encap_record(&state, (uint8_t *)bottom,
+                        available, records_walked, savedtosend) == 0) {
+                    halted = 1;
+                    break;
+                }
+                savedtosend ++;
+
+            }
+            bottom += available;
+        } while (available > 0 && savedtosend < NDAG_BATCH_SIZE);
+
+        if (savedtosend > 0) {
+                if (ndag_send_encap_records(&state, savedtosend) == 0) {
+                    break;
+                }
+        }
+
     }
 
     gettimeofday(&endtime, NULL);
-    if (state.sendbuf) {
-        free(state.sendbuf);
-    }
+    ndag_destroy_encap(&state);
 
     timersub(&endtime, &starttime, &timetaken);
     /* Close socket */
@@ -548,7 +560,8 @@ int main(int argc, char **argv) {
     params.mtu = mtu;
 
     gettimeofday(&starttime, NULL);
-    params.globalstart = ((starttime.tv_sec - 1509494400) * 1000) +
+    params.globalstart = bswap_host_to_be64(
+            (starttime.tv_sec - 1509494400) * 1000) +
             (starttime.tv_usec / 1000.0);
     halted = 0;
     threadcount = 0;

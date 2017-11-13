@@ -1,6 +1,7 @@
 #ifndef NDAGMULTICASTER_H_
 #define NDAGMULTICASTER_H_
 
+#include <sys/socket.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <libtrace.h>
@@ -16,6 +17,7 @@
 
 #define NDAG_MAGIC_NUMBER (0x4E444147)
 #define NDAG_EXPORT_VERSION 1
+#define NDAG_BATCH_SIZE 20
 
 /* Note: libtrace.h provides PACKED for us... */
 
@@ -37,10 +39,13 @@ typedef struct ndagencapparams {
     uint16_t streamnum;
     uint32_t seqno;
     struct addrinfo *target;
-    char *sendbuf;
+    //char *sendbuf;
     int compresslevel;
     uint64_t starttime;
     uint16_t maxdgramsize;
+
+    struct mmsghdr *mmsgbufs;
+    char *headerspace[NDAG_BATCH_SIZE];
 } ndag_encap_params_t;
 
 enum {
@@ -83,11 +88,16 @@ void *ndag_start_beacon(void *params);
 int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
         char *srcaddr, struct addrinfo **targetinfo);
 void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo);
-uint16_t ndag_send_encap_records(ndag_encap_params_t *params, char *buf,
-        uint32_t tosend, uint16_t reccount);
 int ndag_send_keepalive(ndag_encap_params_t *params);
+
+void ndag_init_encap(ndag_encap_params_t *params, int sock,
+        struct addrinfo *targetinfo, uint16_t monitorid, uint16_t streamid,
+        uint64_t start, uint16_t mtu, int compress);
+void ndag_reset_encap_state(ndag_encap_params_t *params);
+uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
+        uint32_t tosend, uint16_t reccount, int index);
+uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount);
 int ndag_send_encap_libtrace(int sock, libtrace_packet_t *packet);
-
-
+void ndag_destroy_encap(ndag_encap_params_t *params);
 #endif
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
