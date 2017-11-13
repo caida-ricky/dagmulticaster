@@ -245,7 +245,7 @@ uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
     encap->started = params->starttime;
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
-    encap->recordcount = ntohs(reccount);
+    encap->recordcount = htons(reccount);
 
     if (tosend + sizeof(ndag_encap_t) + sizeof(ndag_common_t) >
                 params->maxdgramsize) {
