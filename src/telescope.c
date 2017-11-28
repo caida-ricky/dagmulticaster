@@ -100,7 +100,8 @@ endcpucheck:
 }
 
 static uint32_t walk_stream_buffer(char *bottom, char *top,
-        uint16_t *reccount, uint16_t streamnum, uint16_t maxsize) {
+        uint16_t *reccount, uint16_t streamnum, uint16_t maxsize,
+        dagstreamthread_t *dst) {
 
     uint32_t walked = 0;
 
@@ -108,6 +109,11 @@ static uint32_t walk_stream_buffer(char *bottom, char *top,
         dag_record_t *erfhdr = (dag_record_t *)bottom;
         uint16_t len = ntohs(erfhdr->rlen);
         uint16_t lctr = ntohs(erfhdr->lctr);
+
+        if (top - bottom < len) {
+            /* Partial record in the buffer */
+            break;
+        }
 
         if (walked > 0 && walked + len > maxsize) {
             /* Current record would push us over the end of our datagram */
@@ -120,6 +126,11 @@ static uint32_t walk_stream_buffer(char *bottom, char *top,
             halted = 1;
             return 0;
         }
+
+        if (dst->iovs[0].msg_iov == NULL) {
+            dst->iovs[0].msg_iov = bottom;
+        }
+        dst->iovs[0].msg_iovlen += len;
 
         walked += len;
         bottom += len;
@@ -149,6 +160,11 @@ static void *per_dagstream(void *threaddata) {
     struct addrinfo *targetinfo = NULL;
     struct timeval timetaken, endtime, starttime;
     uint32_t idletime = 0;
+
+    /* Everything we send should be contiguous in memory, so we should
+     * only need one iovec. */
+    dst->iovs = (struct iovec *)malloc(sizeof(struct iovec));
+    dst->iov_alloc = 1;
 
     if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldcancel) != 0) {
         strerror(errno);
@@ -236,16 +252,19 @@ static void *per_dagstream(void *threaddata) {
          *      up with too much data to fit in one datagram.
          */
         do {
+            dst->iovs[0].msg_iov = NULL;
+            dst->iovs[0].msg_iovlen = 0;
+
             available = walk_stream_buffer((char *)bottom, (char *)top,
                 &records_walked, dst->params.streamnum,
-                dst->params.mtu - ENCAP_OVERHEAD);
+                dst->params.mtu - ENCAP_OVERHEAD, dst);
 
             allrecords += records_walked;
             if (available > 0) {
                 idletime = 0;
 
-                if (ndag_push_encap_record(&state, (uint8_t *)bottom,
-                        available, records_walked, savedtosend) == 0) {
+                if (ndag_push_encap_iovecs(&state, dst->iovecs,
+                        dst->iov_alloc, records_walked, savedtosend) == 0) {
                     halted = 1;
                     break;
                 }
@@ -288,6 +307,9 @@ detachstream:
     }
 exitthread:
     /* Finished */
+    if (dst->iovs) {
+        free(dst->iovs);
+    }
     fprintf(stderr, "Exiting thread for stream %d\n", dst->params.streamnum);
     pthread_exit(NULL);
 }

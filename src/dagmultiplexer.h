@@ -28,6 +28,10 @@ typedef struct dsthread {
     streamparams_t params;
     pthread_t tid;
 
+    struct iovec *iovs;
+    uint16_t iov_alloc;
+
+    void *extra;
 
 } dagstreamthread_t;
 
