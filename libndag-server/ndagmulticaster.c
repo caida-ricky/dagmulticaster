@@ -240,7 +240,7 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
         params->mmsgbufs[index].msg_hdr.msg_iov[i+1].iov_len = iovecs[i].iov_len;
     }
 
-    params->mmsgbufs[index].msg_hdr.msg_iovlen = num_iov;
+    params->mmsgbufs[index].msg_hdr.msg_iovlen = num_iov + 1;
 
     encap->recordcount = htons(reccount);
     params->seqno += 1;
@@ -248,7 +248,7 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
         params->seqno ++;
     }
 
-    return reccount & 0x3f;
+    return reccount & 0x3fff;
 }
 
 uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount) {
