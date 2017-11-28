@@ -25,6 +25,8 @@ AC_CHECK_LIB([pthread], [pthread_create],,pthread_found=0)
 AC_CHECK_LIB([numa], [numa_node_of_cpu],,numa_found=0)
 AC_CHECK_LIB([z], [deflate],,zlib_found=0)
 
+AC_CHECK_FUNCS(sendmmsg)
+
 AC_CONFIG_FILES([Makefile libndag-server/Makefile src/Makefile
                 testclient/Makefile])
 

@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
+#include <dagapi.h>
 
 #if HAVE_LIBZ
 #include <zlib.h>
@@ -17,6 +18,11 @@
 
 #include "byteswap.h"
 #include "ndagmulticaster.h"
+
+#if HAVE_SENDMMSG
+#else
+#include <sys/syscall.h>
+#endif
 
 volatile int halted = 0;
 
@@ -149,6 +155,7 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
         params->headerspace[i] = (char *)malloc(NDAG_MAX_DGRAM_SIZE);
         params->mmsgbufs[i].msg_hdr.msg_iov = (struct iovec *)malloc(
                 sizeof(struct iovec) * 2);
+        params->iovec_count[i] = 2;
     }
 
 }
@@ -165,16 +172,17 @@ void ndag_destroy_encap(ndag_encap_params_t *params) {
 
 void ndag_reset_encap_state(ndag_encap_params_t *params) {
 
-    int i;
+    int i, j;
 
     for (i = 0; i < NDAG_BATCH_SIZE; i++) {
         params->mmsgbufs[i].msg_len = 0;
         params->mmsgbufs[i].msg_hdr.msg_name = params->target->ai_addr;
         params->mmsgbufs[i].msg_hdr.msg_namelen = params->target->ai_addrlen;
-        params->mmsgbufs[i].msg_hdr.msg_iov[0].iov_base = NULL;
-        params->mmsgbufs[i].msg_hdr.msg_iov[0].iov_len = 0;
-        params->mmsgbufs[i].msg_hdr.msg_iov[1].iov_base = NULL;
-        params->mmsgbufs[i].msg_hdr.msg_iov[1].iov_len = 0;
+
+        for (j = 0; j < params->iovec_count[i]; j++) {
+            params->mmsgbufs[i].msg_hdr.msg_iov[j].iov_base = NULL;
+            params->mmsgbufs[i].msg_hdr.msg_iov[j].iov_len = 0;
+        }
         params->mmsgbufs[i].msg_hdr.msg_iovlen = 0;
         params->mmsgbufs[i].msg_hdr.msg_control = NULL;
         params->mmsgbufs[i].msg_hdr.msg_controllen = 0;
@@ -234,6 +242,59 @@ static inline uint32_t compress_erf_records(char *src, uint32_t len,
     return compressed;
 }
 
+uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
+        struct iovec *iovecs, uint16_t num_iov, uint16_t reccount, int index) {
+
+    ndag_encap_t *encap;
+    int i;
+
+    encap = (ndag_encap_t *)(populate_common_header(params->headerspace[index],
+            params->monitorid, NDAG_PKT_ENCAPERF));
+    encap->started = params->starttime;
+    encap->seqno = htonl(params->seqno);
+    encap->streamid = htons(params->streamnum);
+
+    if (params->iovec_count[index] < num_iov + 1) {
+        params->mmsgbufs[index].msg_hdr.msg_iov = realloc(
+                params->mmsgbufs[index].msg_hdr.msg_iov, (num_iov + 1) *
+                sizeof(struct iovec));
+        params->iovec_count[index] = num_iov + 1;
+    }
+
+    params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
+            params->headerspace[index];
+    params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_len =
+            sizeof(ndag_common_t) + sizeof(ndag_encap_t);
+
+    if (num_iov == 1 && iovecs[1].iov_len > params->maxdgramsize -
+                sizeof(ndag_common_t) - sizeof(ndag_encap_t)) {
+
+        /* Just the one record and it is too big to send, so truncate it */
+	    dag_record_t *erfptr = (dag_record_t *)iovecs[1].iov_base;
+        reccount |= 0x8000;
+
+        erfptr->rlen = htons(params->maxdgramsize - sizeof(ndag_common_t) -
+                sizeof(ndag_encap_t));
+        iovecs[1].iov_len = params->maxdgramsize - sizeof(ndag_common_t) -
+                sizeof(ndag_encap_t);
+    }
+
+    for (i = 1; i <= num_iov; i++) {
+        params->mmsgbufs[index].msg_hdr.msg_iov[i].iov_base = iovecs[i].iov_base;
+        params->mmsgbufs[index].msg_hdr.msg_iov[i].iov_len = iovecs[i].iov_len;
+    }
+
+    params->mmsgbufs[index].msg_hdr.msg_iovlen = num_iov + 1;
+
+    encap->recordcount = htons(reccount);
+    params->seqno += 1;
+    if (params->seqno == 0) {
+        params->seqno ++;
+    }
+
+    return reccount & 0x3f;
+}
+
 uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
         uint32_t tosend, uint16_t reccount, int index) {
 
@@ -245,15 +306,17 @@ uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
     encap->started = params->starttime;
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
-    encap->recordcount = htons(reccount);
 
     if (tosend + sizeof(ndag_encap_t) + sizeof(ndag_common_t) >
                 params->maxdgramsize) {
+	    dag_record_t *erfptr = (dag_record_t *)buf;
+
         /* Use MSB for indicating truncation */
         reccount |= 0x8000;
         pktsize = params->maxdgramsize;
         tosend = params->maxdgramsize - sizeof(ndag_common_t) -
                 sizeof(ndag_encap_t);
+    	erfptr->rlen = htons(tosend);
     } else {
         pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
     }
@@ -292,12 +355,13 @@ uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
 
     }
 
+    encap->recordcount = htons(reccount);
     params->seqno += 1;
     if (params->seqno == 0) {
         params->seqno ++;
     }
 
-    return reccount;
+    return reccount & 0x3f;
 }
 
 uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount) {
@@ -307,11 +371,20 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount) {
         return 0;
     }
 
+#if HAVE_SENDMMSG
     if (sendmmsg(params->sock, params->mmsgbufs, msgcount, 0) != msgcount) {
         fprintf(stderr, "Failed to send nDAG encap. records: %s\n",
                 strerror(errno));
         reccount = 0;
     }
+#else
+    if (syscall(__NR_sendmmsg, params->sock, params->mmsgbufs, msgcount,
+                0) != msgcount) {
+        fprintf(stderr, "Failed to send nDAG encap. records: %s\n",
+                strerror(errno));
+        reccount = 0;
+    }
+#endif
 
     return reccount;
 }
@@ -405,7 +478,6 @@ void *ndag_start_beacon(void *params) {
     beacsize = construct_beacon(&beaconrec, nparams);
 
     while (beacsize > 0 && beaconrec != NULL && !halted) {
-
         if (sendto(beacsock, beaconrec, beacsize, 0, targetinfo->ai_addr,
                     targetinfo->ai_addrlen) != beacsize) {
             fprintf(stderr, "Failed to send the full nDAG beacon: %s\n",
