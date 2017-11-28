@@ -1,6 +1,6 @@
-bin_PROGRAMS=prototype
+bin_PROGRAMS=telescope
 
-prototype_SOURCES=prototype.c dagmultiplexer.h
-prototype_LDADD = @ADD_LIBS@ -lndagserver
-prototype_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
-prototype_CFLAGS=-I"$(top_srcdir)/libndag-server"
+telescope_SOURCES=telescope.c dagmultiplexer.h
+telescope_LDADD = @ADD_LIBS@ -lndagserver
+telescope_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
+telescope_CFLAGS=-I"$(top_srcdir)/libndag-server"
