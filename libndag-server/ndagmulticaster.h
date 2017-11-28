@@ -39,8 +39,6 @@ typedef struct ndagencapparams {
     uint16_t streamnum;
     uint32_t seqno;
     struct addrinfo *target;
-    //char *sendbuf;
-    int compresslevel;
     uint64_t starttime;
     uint16_t maxdgramsize;
 
@@ -95,8 +93,6 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
         struct addrinfo *targetinfo, uint16_t monitorid, uint16_t streamid,
         uint64_t start, uint16_t mtu, int compress);
 void ndag_reset_encap_state(ndag_encap_params_t *params);
-uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
-        uint32_t tosend, uint16_t reccount, int index);
 uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
         struct iovec *iovecs, uint16_t num_iov, uint16_t reccount, int index);
 uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount);

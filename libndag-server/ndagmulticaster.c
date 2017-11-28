@@ -12,10 +12,6 @@
 #include <unistd.h>
 #include <dagapi.h>
 
-#if HAVE_LIBZ
-#include <zlib.h>
-#endif
-
 #include "byteswap.h"
 #include "ndagmulticaster.h"
 
@@ -145,7 +141,6 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
     params->target = targetinfo;
     params->streamnum = streamid;
     params->seqno = 1;
-    params->compresslevel = compress;
     params->starttime = start;
     params->maxdgramsize = mtu;
     params->mmsgbufs = (struct mmsghdr *)malloc(sizeof(struct mmsghdr)
@@ -203,45 +198,6 @@ static inline char *populate_common_header(char *bufstart,
     return bufstart + sizeof(ndag_common_t);
 }
 
-static inline uint32_t compress_erf_records(char *src, uint32_t len,
-        char *dst, int level, uint16_t dstsize) {
-
-    uint32_t compressed = 0;
-#if HAVE_LIBZ
-    z_stream strm;
-    int ret;
-
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-
-    if (deflateInit(&strm, level) != Z_OK) {
-        fprintf(stderr, "Failed to init zlib.\n");
-        return 0;
-    }
-
-    strm.avail_in = len;
-    strm.next_in = src;
-    strm.avail_out = dstsize;
-    strm.next_out = dst;
-
-    while (strm.avail_in > 0) {
-        int prevout = strm.avail_out;
-        ret = deflate(&strm, Z_NO_FLUSH);
-        if (ret != Z_OK) {
-            fprintf(stderr, "Error while compressing ERF records: %s\n",
-                    zError(ret));
-            compressed = 0;
-            break;
-        }
-        compressed += (prevout - strm.avail_out);
-    }
-
-    (void)deflateEnd(&strm);
-#endif
-    return compressed;
-}
-
 uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
         struct iovec *iovecs, uint16_t num_iov, uint16_t reccount, int index) {
 
@@ -254,11 +210,11 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
 
-    if (params->iovec_count[index] < num_iov + 1) {
+    if (params->iovec_count[index] < num_iov) {
         params->mmsgbufs[index].msg_hdr.msg_iov = realloc(
-                params->mmsgbufs[index].msg_hdr.msg_iov, (num_iov + 1) *
+                params->mmsgbufs[index].msg_hdr.msg_iov, num_iov *
                 sizeof(struct iovec));
-        params->iovec_count[index] = num_iov + 1;
+        params->iovec_count[index] = num_iov;
     }
 
     params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
@@ -266,94 +222,25 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
     params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_len =
             sizeof(ndag_common_t) + sizeof(ndag_encap_t);
 
-    if (num_iov == 1 && iovecs[1].iov_len > params->maxdgramsize -
+    if (num_iov == 1 && iovecs[0].iov_len > params->maxdgramsize -
                 sizeof(ndag_common_t) - sizeof(ndag_encap_t)) {
 
         /* Just the one record and it is too big to send, so truncate it */
-	    dag_record_t *erfptr = (dag_record_t *)iovecs[1].iov_base;
+	    dag_record_t *erfptr = (dag_record_t *)iovecs[0].iov_base;
         reccount |= 0x8000;
 
         erfptr->rlen = htons(params->maxdgramsize - sizeof(ndag_common_t) -
                 sizeof(ndag_encap_t));
-        iovecs[1].iov_len = params->maxdgramsize - sizeof(ndag_common_t) -
+        iovecs[0].iov_len = params->maxdgramsize - sizeof(ndag_common_t) -
                 sizeof(ndag_encap_t);
     }
 
-    for (i = 1; i <= num_iov; i++) {
+    for (i = 0; i < num_iov; i++) {
         params->mmsgbufs[index].msg_hdr.msg_iov[i].iov_base = iovecs[i].iov_base;
         params->mmsgbufs[index].msg_hdr.msg_iov[i].iov_len = iovecs[i].iov_len;
     }
 
-    params->mmsgbufs[index].msg_hdr.msg_iovlen = num_iov + 1;
-
-    encap->recordcount = htons(reccount);
-    params->seqno += 1;
-    if (params->seqno == 0) {
-        params->seqno ++;
-    }
-
-    return reccount & 0x3f;
-}
-
-uint16_t ndag_push_encap_record(ndag_encap_params_t *params, uint8_t *buf,
-        uint32_t tosend, uint16_t reccount, int index) {
-
-    ndag_encap_t *encap;
-    uint32_t pktsize = 0;
-
-    encap = (ndag_encap_t *)(populate_common_header(params->headerspace[index],
-            params->monitorid, NDAG_PKT_ENCAPERF));
-    encap->started = params->starttime;
-    encap->seqno = htonl(params->seqno);
-    encap->streamid = htons(params->streamnum);
-
-    if (tosend + sizeof(ndag_encap_t) + sizeof(ndag_common_t) >
-                params->maxdgramsize) {
-	    dag_record_t *erfptr = (dag_record_t *)buf;
-
-        /* Use MSB for indicating truncation */
-        reccount |= 0x8000;
-        pktsize = params->maxdgramsize;
-        tosend = params->maxdgramsize - sizeof(ndag_common_t) -
-                sizeof(ndag_encap_t);
-    	erfptr->rlen = htons(tosend);
-    } else {
-        pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
-    }
-
-    /* XXX Compression has a massive performance impact, but I've left
-     * this option in regardless. Use at your own risk...
-     */
-    if (params->compresslevel > 0) {
-        char *dest = params->headerspace[index] + sizeof(ndag_common_t) +
-                sizeof(ndag_encap_t);
-
-        tosend = compress_erf_records(buf, tosend, dest,
-                params->compresslevel, params->maxdgramsize);
-        if (tosend == 0) {
-            fprintf(stderr, "Error while trying to compress ERF records\n");
-            return 0;
-        }
-
-        pktsize = sizeof(ndag_common_t) + sizeof(ndag_encap_t) + tosend;
-
-        /* Use 2nd MSB for indicating compression. */
-        reccount |= 0x4000;
-        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
-                params->headerspace[index];
-        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_len = pktsize;
-        params->mmsgbufs[index].msg_hdr.msg_iovlen = 1;
-
-    } else {
-        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
-                params->headerspace[index];
-        params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_len =
-                sizeof(ndag_common_t) + sizeof(ndag_encap_t);
-        params->mmsgbufs[index].msg_hdr.msg_iov[1].iov_base = buf;
-        params->mmsgbufs[index].msg_hdr.msg_iov[1].iov_len = tosend;
-        params->mmsgbufs[index].msg_hdr.msg_iovlen = 2;
-
-    }
+    params->mmsgbufs[index].msg_hdr.msg_iovlen = num_iov;
 
     encap->recordcount = htons(reccount);
     params->seqno += 1;
