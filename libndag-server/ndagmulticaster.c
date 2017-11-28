@@ -236,8 +236,8 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
     }
 
     for (i = 0; i < num_iov; i++) {
-        params->mmsgbufs[index].msg_hdr.msg_iov[i].iov_base = iovecs[i].iov_base;
-        params->mmsgbufs[index].msg_hdr.msg_iov[i].iov_len = iovecs[i].iov_len;
+        params->mmsgbufs[index].msg_hdr.msg_iov[i+1].iov_base = iovecs[i].iov_base;
+        params->mmsgbufs[index].msg_hdr.msg_iov[i+1].iov_len = iovecs[i].iov_len;
     }
 
     params->mmsgbufs[index].msg_hdr.msg_iovlen = num_iov;
