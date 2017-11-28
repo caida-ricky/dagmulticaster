@@ -127,10 +127,10 @@ static uint32_t walk_stream_buffer(char *bottom, char *top,
             return 0;
         }
 
-        if (dst->iovs[0].msg_iov == NULL) {
-            dst->iovs[0].msg_iov = bottom;
+        if (dst->iovs[0].iov_base == NULL) {
+            dst->iovs[0].iov_base = bottom;
         }
-        dst->iovs[0].msg_iovlen += len;
+        dst->iovs[0].iov_len += len;
 
         walked += len;
         bottom += len;
@@ -252,8 +252,8 @@ static void *per_dagstream(void *threaddata) {
          *      up with too much data to fit in one datagram.
          */
         do {
-            dst->iovs[0].msg_iov = NULL;
-            dst->iovs[0].msg_iovlen = 0;
+            dst->iovs[0].iov_base = NULL;
+            dst->iovs[0].iov_len = 0;
 
             available = walk_stream_buffer((char *)bottom, (char *)top,
                 &records_walked, dst->params.streamnum,
@@ -262,8 +262,7 @@ static void *per_dagstream(void *threaddata) {
             allrecords += records_walked;
             if (available > 0) {
                 idletime = 0;
-
-                if (ndag_push_encap_iovecs(&state, dst->iovecs,
+                if (ndag_push_encap_iovecs(&state, dst->iovs,
                         dst->iov_alloc, records_walked, savedtosend) == 0) {
                     halted = 1;
                     break;
