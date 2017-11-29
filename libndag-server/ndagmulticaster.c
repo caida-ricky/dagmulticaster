@@ -143,11 +143,11 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
     params->seqno = 1;
     params->starttime = start;
     params->maxdgramsize = mtu;
-    params->mmsgbufs = (struct mmsghdr *)malloc(sizeof(struct mmsghdr)
-            * NDAG_BATCH_SIZE);
+    params->mmsgbufs = (struct mmsghdr *)calloc(sizeof(struct mmsghdr),
+            NDAG_BATCH_SIZE);
 
     for (i = 0; i < NDAG_BATCH_SIZE; i++) {
-        params->headerspace[i] = (char *)malloc(NDAG_MAX_DGRAM_SIZE);
+        params->headerspace[i] = (char *)calloc(1, NDAG_MAX_DGRAM_SIZE);
         params->mmsgbufs[i].msg_hdr.msg_iov = (struct iovec *)malloc(
                 sizeof(struct iovec) * 2);
         params->iovec_count[i] = 2;
@@ -210,11 +210,11 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
 
-    if (params->iovec_count[index] < num_iov) {
+    if (params->iovec_count[index] < num_iov + 1) {
         params->mmsgbufs[index].msg_hdr.msg_iov = realloc(
-                params->mmsgbufs[index].msg_hdr.msg_iov, num_iov *
+                params->mmsgbufs[index].msg_hdr.msg_iov, (num_iov + 1) *
                 sizeof(struct iovec));
-        params->iovec_count[index] = num_iov;
+        params->iovec_count[index] = num_iov + 1;
     }
 
     params->mmsgbufs[index].msg_hdr.msg_iov[0].iov_base =
@@ -272,7 +272,6 @@ uint16_t ndag_send_encap_records(ndag_encap_params_t *params, int msgcount) {
         reccount = 0;
     }
 #endif
-
     return reccount;
 }
 
