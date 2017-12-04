@@ -25,81 +25,14 @@
 
 #define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
 
-int threadcount = 0;
-volatile int halted = 0;
-volatile int paused = 0;
-
 static void halt_signal(int signal) {
     (void) signal;
-    halted = 1;
+    halt_program();
 }
 
 static void toggle_pause_signal(int signal) {
     (void) signal;
-
-    if (paused && threadcount == 0) {
-        paused = 0;
-    }
-    if (!paused) {
-        paused = 1;
-    }
-}
-
-
-static int get_nb_cores() {
-        int numCPU;
-#ifdef _SC_NPROCESSORS_ONLN
-        /* Most systems do this now */
-        numCPU = sysconf(_SC_NPROCESSORS_ONLN);
-
-#else
-        int mib[] = {CTL_HW, HW_AVAILCPU};
-        size_t len = sizeof(numCPU);
-
-        /* get the number of CPUs from the system */
-        sysctl(mib, 2, &numCPU, &len, NULL, 0);
-#endif
-        return numCPU <= 0 ? 1 : numCPU;
-}
-
-static int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
-        uint16_t streamnum) {
-
-    int i, cpuid;
-    dag_card_ref_t cardref = NULL;
-    dag_component_t root = NULL;
-    dag_component_t streamconf = NULL;
-    attr_uuid_t any;
-    void *ptr;
-    mem_node_t *meminfo;
-
-    cardref = dag_config_init(dagdevname);
-    root = dag_config_get_root_component(cardref);
-    streamconf = dag_component_get_subcomponent(root, kComponentStream,
-            streamnum);
-
-    any = dag_component_get_attribute_uuid(streamconf,
-            kStructAttributeMemNode);
-
-    if (dag_config_get_struct_attribute(cardref, any, &ptr) != 0) {
-        cpuid = -1;
-        goto endcpucheck;
-    }
-
-    meminfo = (mem_node_t *)ptr;
-
-    for (i = 1; i < get_nb_cores(); i++) {
-        if (numa_node_of_cpu(i) == meminfo->node && cpumap[i] == 0) {
-            cpumap[i] = 1;
-            cpuid = i;
-            goto endcpucheck;
-        }
-    }
-
-endcpucheck:
-    dag_config_dispose(cardref);
-    return cpuid;
-
+    pause_program();
 }
 
 static char *walk_stream_buffer(char *bottom, char *top,
@@ -124,7 +57,7 @@ static char *walk_stream_buffer(char *bottom, char *top,
         if (lctr != 0) {
             fprintf(stderr, "Loss counter for stream %u is %u\n", streamnum,
                     lctr);
-            halted = 1;
+            halt_program();
             return bottom;
         }
 
@@ -138,7 +71,7 @@ static char *walk_stream_buffer(char *bottom, char *top,
             if (trace_prepare_packet(wdcap->dummytrace, wdcap->packet, bottom,
                     TRACE_RT_DATA_ERF, TRACE_PREP_DO_NOT_OWN_BUFFER) == -1) {
                 fprintf(stderr, "Unable to convert DAG buffer contents to libtrace packet.\n");
-                halted = 1;
+                halt_program();
                 return bottom;
             }
             snapto = processWdcapPacket(wdcap->wdcapproc, wdcap->packet);
@@ -243,65 +176,47 @@ static char *walk_stream_buffer(char *bottom, char *top,
 
 }
 
-static void *per_dagstream(void *threaddata) {
+uint16_t wdcap_walk_records(char **bottom, char *top, dagstreamthread_t *dst,
+        uint16_t *savedtosend, ndag_encap_params_t *state) {
 
-    dag_size_t mindata;
-    struct timeval maxwait, poll;
-    ndag_encap_params_t state;
-    dagstreamthread_t *dst = (dagstreamthread_t *)threaddata;
-    void *bottom, *top;
+    uint16_t total_walked = 0;
+    uint16_t records_walked;
     uint16_t available = 0;
-    int sock = -1;
-    int oldcancel, i;
-    uint64_t allrecords = 0;
-    struct addrinfo *targetinfo = NULL;
-    struct timeval timetaken, endtime, starttime;
-    uint32_t idletime = 0;
     wdcapdata_t *wdcap = (wdcapdata_t *)dst->extra;
 
-    if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldcancel) != 0) {
-        strerror(errno);
+    do {
+        records_walked = 0;
+        (*bottom) = walk_stream_buffer((*bottom), top,
+                &records_walked, &available, dst, wdcap);
+
+        total_walked += records_walked;
+        if (records_walked > 0) {
+            dst->idletime = 0;
+
+            if (ndag_push_encap_iovecs(state, dst->iovs, available + 1,
+                        records_walked, *savedtosend) == 0) {
+                halt_program();
+                break;
+            }
+            (*savedtosend) = (*savedtosend) + 1;
+
+        }
+    } while (!is_halted() && records_walked > 0 && *savedtosend < NDAG_BATCH_SIZE);
+
+    return total_walked;
+
+}
+
+static void *per_dagstream(void *threaddata) {
+
+    ndag_encap_params_t state;
+    dagstreamthread_t *dst = (dagstreamthread_t *)threaddata;
+    wdcapdata_t *wdcap = (wdcapdata_t *)dst->extra;
+
+    if (init_dag_stream(dst, &state) == -1) {
+        halt_dag_stream(dst, NULL);
         goto exitthread;
     }
-
-    /* Set polling parameters
-     * TODO: are these worth making configurable?
-     * Currently defined in dagmultiplexer.h.
-     */
-    mindata = DAG_POLL_MINDATA;
-    maxwait.tv_sec = 0;
-    maxwait.tv_usec = DAG_POLL_MAXWAIT;
-    poll.tv_sec = 0;
-    poll.tv_usec = DAG_POLL_FREQ;
-
-    if (dag_set_stream_poll64(dst->params.dagfd, dst->params.streamnum,
-            mindata, &maxwait, &poll) != 0) {
-        fprintf(stderr, "Failed to set polling parameters for DAG stream %d: %s\n",
-                dst->params.streamnum, strerror(errno));
-        goto detachstream;
-    }
-
-    /* Start stream */
-    if (dag_start_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
-        fprintf(stderr, "Failed to start DAG stream %d: %s\n",
-                dst->params.streamnum, strerror(errno));
-        goto detachstream;
-    }
-
-
-    /* Create an exporting socket */
-    sock = ndag_create_multicaster_socket(dst->params.exportport,
-            dst->params.multicastgroup, dst->params.sourceaddr, &targetinfo);
-    if (sock == -1) {
-        fprintf(stderr, "Failed to create multicaster socket for DAG stream %d\n",
-                dst->params.streamnum);
-        goto stopstream;
-    }
-
-    ndag_init_encap(&state, sock, targetinfo, dst->params.monitorid,
-            dst->params.streamnum, dst->params.globalstart, dst->params.mtu,
-            0);
-
 
     if (wdcap->wdcapconf) {
         wdcap->wdcapproc = createWdcapPacketProcessor(wdcap->wdcapconf);
@@ -311,95 +226,17 @@ static void *per_dagstream(void *threaddata) {
         wdcap->dummytrace = trace_create_dead("erf:dummy.erf");
     }
 
-    bottom = NULL;
-    top = NULL;
-
-    fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
-    gettimeofday(&starttime, NULL);
-    /* DO dag_advance_stream WHILE not interrupted and not error */
-    while (!halted && !paused) {
-        uint16_t records_walked = 0;
-        int savedtosend = 0;
-
-        top = dag_advance_stream(dst->params.dagfd, dst->params.streamnum,
-                (uint8_t **)(&bottom));
-        if (top == NULL) {
-            fprintf(stderr, "Error while advancing DAG stream %d: %s\n",
-                    dst->params.streamnum, strerror(errno));
-            break;
-        }
-
-        if (bottom == top) {
-            idletime += DAG_POLL_MAXWAIT;
-
-            if (idletime > 5 * 1000000) {
-                if (ndag_send_keepalive(&state) < 0) {
-                    break;
-                }
-                idletime = 0;
-            }
-            continue;
-        }
-
-        ndag_reset_encap_state(&state);
-        /* Sadly, we have to walk whatever dag_advance_stream gives us because
-         *   a) top is not guaranteed to be on a packet boundary.
-         *   b) there is no way to put an upper limit on the amount of bytes
-         *      that top is moved forward, so we can't guarantee we won't end
-         *      up with too much data to fit in one datagram.
-         */
-        do {
-            records_walked = 0;
-            bottom = walk_stream_buffer((char *)bottom, (char *)top,
-                &records_walked, &available, dst, wdcap);
-
-            allrecords += records_walked;
-            if (records_walked > 0) {
-                idletime = 0;
-
-                if (ndag_push_encap_iovecs(&state, dst->iovs, available + 1,
-                        records_walked, savedtosend) == 0) {
-                    halted = 1;
-                    break;
-                }
-                savedtosend ++;
-
-            }
-        } while (!halted && records_walked > 0 && savedtosend < NDAG_BATCH_SIZE);
-        if (savedtosend > 0) {
-                if (ndag_send_encap_records(&state, savedtosend) == 0) {
-                    break;
-                }
-        }
-
-    }
-
-    gettimeofday(&endtime, NULL);
+    dag_stream_loop(dst, &state, wdcap_walk_records);
     ndag_destroy_encap(&state);
+    halt_dag_stream(dst, &state);
 
-    timersub(&endtime, &starttime, &timetaken);
-    /* Close socket */
-    fprintf(stderr, "Halting stream %d after processing %lu records in %d.%d seconds\n",
-            dst->params.streamnum, allrecords, timetaken.tv_sec,
-            timetaken.tv_usec);
-
-    /* Stop stream */
-stopstream:
-    if (dag_stop_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
-        fprintf(stderr, "Error while stopping DAG stream %d: %s\n",
-                dst->params.streamnum, strerror(errno));
-    }
-    ndag_close_multicaster_socket(sock, targetinfo);
-
-detachstream:
-    /* Detach stream */
-    if (dag_detach_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
-        fprintf(stderr, "Error while detaching DAG stream %d: %s\n",
-                dst->params.streamnum, strerror(errno));
-    }
 exitthread:
-    /* Finished */
     fprintf(stderr, "Exiting thread for stream %d\n", dst->params.streamnum);
+    pthread_exit(NULL);
+}
+
+static void destroy_wdcap_data(void *data) {
+    wdcapdata_t *wdcap = (wdcapdata_t *)data;
 
     if (wdcap->wdcapproc) {
         deleteWdcapPacketProcessor(wdcap->wdcapproc);
@@ -410,29 +247,13 @@ exitthread:
     if (wdcap->dummytrace) {
         trace_destroy_dead(wdcap->dummytrace);
     }
-    free(dst->iovs);
     free(wdcap);
-
-    pthread_exit(NULL);
 }
 
-static int start_dag_thread(streamparams_t *params, int index,
-        dagstreamthread_t *nextslot, uint16_t firstport, uint8_t *cpumap,
-        WdcapProcessingConfig *wdcapconf) {
+static void *init_wdcap_data(void *conf) {
 
-    int ret, nextdagcpu;
+    WdcapProcessingConfig *wdcapconf = (WdcapProcessingConfig *)conf;
     wdcapdata_t *wdcapdata = (wdcapdata_t *)malloc(sizeof(wdcapdata_t));
-#ifdef __linux__
-    pthread_attr_t attrib;
-    cpu_set_t cpus;
-    int i;
-#endif
-
-    nextslot->params = *params;
-    nextslot->iovs = (struct iovec *)malloc(sizeof(struct iovec) * 2);
-    nextslot->iov_alloc = 2;
-    nextslot->extra = wdcapdata;
-
     wdcapdata->wdcapconf = wdcapconf;
     wdcapdata->wdcapproc = NULL;
     wdcapdata->skipwdcap = 1;
@@ -440,102 +261,7 @@ static int start_dag_thread(streamparams_t *params, int index,
     wdcapdata->packet = NULL;
     wdcapdata->dummytrace = NULL;
 
-    /* Choose destination port for multicast */
-    nextslot->params.exportport = firstport + (index * DAG_MULTIPLEX_PORT_INCR);
-    nextslot->params.streamnum = index * 2;
-
-    assert(nextslot->params.exportport <= 65534);
-
-    /* Attach to a stream */
-    if (dag_attach_stream64(params->dagfd, nextslot->params.streamnum, 0,
-            8 * 1024 * 1024) != 0) {
-        if (errno == ENOMEM)
-            return 0;
-
-        fprintf(stderr, "Failed to attach to DAG stream %d: %s\n",
-                nextslot->params.streamnum, strerror(errno));
-        return -1;
-    }
-
-    /* Check buffer size: if zero, we can save ourselves a thread because
-     * we're not going to get any packets on this stream.
-     */
-    if (dag_get_stream_buffer_size64(params->dagfd,
-            nextslot->params.streamnum) <= 0) {
-        dag_detach_stream(params->dagfd, nextslot->params.streamnum);
-        return 0;
-    }
-
-    nextdagcpu = get_next_thread_cpu(params->dagdevname, cpumap,
-            nextslot->params.streamnum);
-    if (nextdagcpu == -1) {
-        /* TODO better error handling */
-        /* TODO allow users to decide that they want more than one stream per
-         * CPU */
-        fprintf(stderr,
-                "Not enough CPUs for the number of threads requested?\n");
-        return -1;
-    }
-
-
-#ifdef __linux__
-
-	/* Control which core this thread is bound to */
-    CPU_ZERO(&cpus);
-    CPU_SET(nextdagcpu, &cpus);
-    pthread_attr_init(&attrib);
-    pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
-    ret = pthread_create(&nextslot->tid, &attrib, per_dagstream,
-            (void *)nextslot);
-    pthread_attr_destroy(&attrib);
-
-#else
-    ret = pthread_create(&nextslot->tid, NULL, per_dagstream,
-            (void *)nextslot);
-#endif
-
-
-    if (ret != 0) {
-        return -1;
-    }
-
-    return 1;
-}
-
-
-int create_multiplex_beaconer(beaconthread_t *bthread) {
-
-    int ret;
-
-#ifdef __linux__
-    pthread_attr_t attrib;
-    cpu_set_t cpus;
-    int i;
-#endif
-
-#ifdef __linux__
-
-	/* This thread is low impact so can be bound to core 0 */
-    CPU_ZERO(&cpus);
-	CPU_SET(0, &cpus);
-    pthread_attr_init(&attrib);
-    pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
-    ret = pthread_create(&(bthread->tid), &attrib, ndag_start_beacon,
-            (void *)&(bthread->params));
-    pthread_attr_destroy(&attrib);
-
-#else
-    ret = pthread_create(&(bthread->tid), NULL, ndag_start_beacon,
-            (void *)&(bthread->params));
-#endif
-
-
-    if (ret != 0) {
-        return -1;
-    }
-
-    return 1;
-
+    return wdcapdata;
 }
 
 void print_help(char *progname) {
@@ -552,27 +278,21 @@ int main(int argc, char **argv) {
     char *multicastgroup = NULL;
     char *sourceaddr = NULL;
     streamparams_t params;
-    int dagfd, maxstreams, ret, i, errorstate;
+    int dagfd, errorstate;
     dagstreamthread_t *dagthreads = NULL;
-    beaconthread_t *beaconer = NULL;
+    ndag_beacon_params_t beaconparams;
     uint16_t beaconport = 9001;
     uint16_t mtu = 1400;
     time_t t;
     struct sigaction sigact;
-    sigset_t sig_before, sig_block_all;
     uint16_t firstport;
     struct timeval starttime;
     char *wdcapconffile = NULL;
     WdcapProcessingConfig *wdcapconf = NULL;
 
-    uint8_t *cpumap = NULL;
-
     struct sched_param schedparam;
 
     srand((unsigned) time(&t));
-
-    cpumap = (uint8_t *)malloc(sizeof(uint8_t) * get_nb_cores());
-    memset(cpumap, 0, sizeof(uint8_t) * get_nb_cores());
 
     /* Process user config options */
     /*  options:
@@ -708,125 +428,30 @@ int main(int argc, char **argv) {
     params.globalstart = bswap_host_to_be64(
             (starttime.tv_sec - 1509494400) * 1000) +
             (starttime.tv_usec / 1000.0);
-    halted = 0;
-    threadcount = 0;
-    beaconer = (beaconthread_t *)malloc(sizeof(beaconthread_t));
     firstport = 10000 + (rand() % 50000);
 
-    while (!halted) {
-        errorstate = 0;
-        dagthreads = NULL;
+    beaconparams.srcaddr = sourceaddr;
+    beaconparams.groupaddr = multicastgroup;
+    beaconparams.beaconport = beaconport;
+    beaconparams.frequency = DAG_MULTIPLEX_BEACON_FREQ;
+    beaconparams.monitorid = params.monitorid;
 
-        fprintf(stderr, "Starting DAG streams.\n");
-        /* Determine maximum stream count and allocate memory for threads */
-        maxstreams = dag_rx_get_stream_count(dagfd);
-        if (maxstreams < 0) {
-            fprintf(stderr, "Failed to get RX stream count from DAG device: %s\n",
-                    strerror(errno));
-            errorstate = 1;
-            goto halteverything;
+    while (!is_halted()) {
+        errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
+                &params, wdcapconf, init_wdcap_data, per_dagstream,
+                destroy_wdcap_data);
+
+        if (errorstate != 0) {
+            break;
         }
 
-        dagthreads = (dagstreamthread_t *)(
-                malloc(sizeof(dagstreamthread_t) * maxstreams));
-
-        sigemptyset(&sig_block_all);
-        if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
-            fprintf(stderr, "Unable to disable signals before starting threads.\n");
-            errorstate = 1;
-            goto halteverything;
-        }
-
-        /* Create reading thread for each available stream */
-
-        for (i = 0; i < maxstreams; i++) {
-            ret = start_dag_thread(&params, i, &(dagthreads[threadcount]),
-                    firstport, cpumap, wdcapconf);
-
-
-            if (ret < 0) {
-                fprintf(stderr, "Error creating new thread for DAG processing\n");
-                errorstate = 1;
-                goto halteverything;
-            }
-
-            if (ret == 0)
-                continue;
-
-            threadcount += 1;
-        }
-
-        if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL)) {
-            fprintf(stderr, "Unable to re-enable signals after thread creation.\n");
-            errorstate = 1;
-            goto halteverything;
-        }
-
-        if (threadcount == 0) {
-            fprintf(stderr, "Failed to create any usable DAG threads. Exiting.\n");
-            errorstate = 1;
-            goto halteverything;
-        }
-
-        beaconer->params.srcaddr = sourceaddr;
-        beaconer->params.groupaddr = multicastgroup;
-        beaconer->params.beaconport = beaconport;
-        beaconer->params.numstreams = threadcount;
-        beaconer->params.streamports = (uint16_t *)malloc(sizeof(uint16_t) * threadcount);
-        beaconer->params.frequency = DAG_MULTIPLEX_BEACON_FREQ;
-        beaconer->params.monitorid = params.monitorid;
-
-        for (i = 0; i < threadcount; i++) {
-            beaconer->params.streamports[i] =
-                    firstport + (DAG_MULTIPLEX_PORT_INCR * i);
-        }
-
-        /* Create beaconing thread */
-        ret = create_multiplex_beaconer(beaconer);
-        if (ret < 0) {
-            fprintf(stderr, "Failed to create beaconing thread. Exiting.\n");
-            errorstate = 1;
-            goto halteverything;
-        }
-
-        /* Join on all threads */
-        for (i = 0; i < threadcount; i++) {
-            pthread_join(dagthreads[i].tid, NULL);
-        }
-        ndag_interrupt_beacon();
-        pthread_join(beaconer->tid, NULL);
-        free(dagthreads);
-        dagthreads = NULL;
-        threadcount = 0;
-        fprintf(stderr, "All DAG streams have been halted.\n");
-
-        /* If we are paused, we want to wait here until we get the signal to
-         * restart.
-         *
-         * TODO implement pausing and unpausing.
-         */
-        while (paused) {
+        while (is_paused()) {
             usleep(10000);
         }
     }
 
 halteverything:
     fprintf(stderr, "Shutting down DAG multiplexer.\n");
-    if (errorstate) {
-        /* Something went horribly wrong earlier -- force all threads to
-         * stop running.
-         */
-        halted = 1;
-        for (i = 0; i < maxstreams; i++) {
-            /* XXX hope this will actually complete in an error scenario */
-            pthread_join(dagthreads[i].tid, NULL);
-        }
-    }
-    if (dagthreads) {
-        free(dagthreads);
-    }
-    free(beaconer->params.streamports);
-    free(beaconer);
 
     /* Close DAG card */
     dag_close(dagfd);
