@@ -20,6 +20,7 @@
 #include "dagmultiplexer.h"
 #include "ndagmulticaster.h"
 #include "byteswap.h"
+#include "darkfilter.h"
 
 #define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
 
@@ -34,21 +35,70 @@ static void toggle_pause_signal(int signal) {
 }
 
 
-static uint32_t walk_stream_buffer(char *bottom, char *top,
-        uint16_t *reccount, dagstreamthread_t *dst) {
+static char * walk_stream_buffer(char *bottom, char *top,
+        uint16_t *reccount, uint16_t *curiov, dagstreamthread_t *dst,
+        darkfilter_t *filter) {
 
     uint32_t walked = 0;
     uint16_t streamnum = dst->params.streamnum;
     uint16_t maxsize = dst->params.mtu - ENCAP_OVERHEAD;
+    int ret;
+
+    *curiov = 0;
+    dst->iovs[*curiov].iov_base = NULL;
+    dst->iovs[*curiov].iov_len = 0;
 
     while (bottom < top && walked < maxsize) {
         dag_record_t *erfhdr = (dag_record_t *)bottom;
         uint16_t len = ntohs(erfhdr->rlen);
         uint16_t lctr = ntohs(erfhdr->lctr);
 
+        if (lctr != 0) {
+            fprintf(stderr, "Loss counter for stream %u is %u\n", streamnum,
+                    lctr);
+            halt_program();
+            return bottom;
+        }
+
         if (top - bottom < len) {
             /* Partial record in the buffer */
             break;
+        }
+
+        if (filter) {
+            if (trace_prepare_packet(filter->dummytrace, filter->packet,
+                    bottom, TRACE_RT_DATA_ERF, TRACE_PREP_DO_NOT_OWN_BUFFER)
+                    == -1) {
+                fprintf(stderr, "Unable to convert DAG buffer contents to libtrace packet.\n");
+                halt_program();
+                return bottom;
+            }
+
+            ret = apply_darkfilter(filter);
+            if (ret < 0) {
+                fprintf(stderr, "Error applying darknet filter to received traffic.\n");
+                halt_program();
+                return bottom;
+            }
+
+            if (ret == 0) {
+
+                /* Skipping packet, so end current iovec if it has something
+                 * in it already. */
+                if (dst->iovs[*curiov].iov_len == 0) {
+                    bottom += len;
+                    continue;
+                }
+                *curiov = *curiov + 1;
+                if (*curiov == dst->iov_alloc) {
+                    dst->iovs = (struct iovec *)realloc(dst->iovs,
+                            sizeof(struct iovec) * (dst->iov_alloc + 10));
+                    dst->iov_alloc += 10;
+                }
+                dst->iovs[*curiov].iov_base = NULL;
+                dst->iovs[*curiov].iov_len = 0;
+                continue;
+            }
         }
 
         if (walked > 0 && walked + len > maxsize) {
@@ -56,17 +106,10 @@ static uint32_t walk_stream_buffer(char *bottom, char *top,
             break;
         }
 
-        if (lctr != 0) {
-            fprintf(stderr, "Loss counter for stream %u is %u\n", streamnum,
-                    lctr);
-            halt_program();
-            return 0;
+        if (dst->iovs[*curiov].iov_base == NULL) {
+            dst->iovs[*curiov].iov_base = bottom;
         }
-
-        if (dst->iovs[0].iov_base == NULL) {
-            dst->iovs[0].iov_base = bottom;
-        }
-        dst->iovs[0].iov_len += len;
+        dst->iovs[*curiov].iov_len += len;
 
         walked += len;
         bottom += len;
@@ -78,7 +121,7 @@ static uint32_t walk_stream_buffer(char *bottom, char *top,
      * packet record if it is too big and set the truncation flag.
      */
 
-    return walked;
+    return bottom;
 
 }
 
@@ -86,9 +129,10 @@ uint16_t telescope_walk_records(char **bottom, char *top,
         dagstreamthread_t *dst, uint16_t *savedtosend,
         ndag_encap_params_t *state) {
 
-    uint32_t available = 0;
+    uint16_t available = 0;
     uint16_t total_walked = 0;
     uint16_t records_walked = 0;
+    darkfilter_t *filter = (darkfilter_t *)dst->extra;
 
     /* Sadly, we have to walk whatever dag_advance_stream gives us because
      *   a) top is not guaranteed to be on a packet boundary.
@@ -96,25 +140,27 @@ uint16_t telescope_walk_records(char **bottom, char *top,
      *      that top is moved forward, so we can't guarantee we won't end
      *      up with too much data to fit in one datagram.
      */
-    do {
-        dst->iovs[0].iov_base = NULL;
-        dst->iovs[0].iov_len = 0;
 
-        available = walk_stream_buffer((*bottom), top, &records_walked, dst);
+
+    do {
+        records_walked = 0;
+        (*bottom) = walk_stream_buffer((*bottom), top,
+                &records_walked, &available, dst, filter);
 
         total_walked += records_walked;
-        if (available > 0) {
+        if (records_walked > 0) {
             dst->idletime = 0;
-            if (ndag_push_encap_iovecs(state, dst->iovs,
-                        1, records_walked, *savedtosend) == 0) {
+
+            if (ndag_push_encap_iovecs(state, dst->iovs, available + 1,
+                        records_walked, *savedtosend) == 0) {
                 halt_program();
                 break;
             }
             (*savedtosend) = (*savedtosend) + 1;
 
         }
-        (*bottom) += available;
-    } while (!is_halted() & available > 0 && *savedtosend < NDAG_BATCH_SIZE);
+    } while (!is_halted() && records_walked > 0 &&
+        *savedtosend < NDAG_BATCH_SIZE);
 
     return total_walked;
 }
@@ -139,9 +185,10 @@ static void *per_dagstream(void *threaddata) {
 void print_help(char *progname) {
 
     fprintf(stderr,
-        "Usage: %s [ -d dagdevice ] [ -p beaconport ] [ -m monitorid ] [ -c ]\n"
+        "Usage: %s [ -d dagdevice ] [ -p beaconport ] [ -m monitorid ] \n"
         "          [ -a multicastaddress ] [ -s sourceaddress ]\n"
-        "          [ -M exportmtu ]\n", progname);
+        "          [ -M exportmtu ] [ -E exclusionfile ] [ -o darknetoctet ]\n",
+        progname);
 
 }
 
@@ -158,6 +205,7 @@ int main(int argc, char **argv) {
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
+    darkfilter_params_t darkp;
 
     srand((unsigned) time(&t));
 
@@ -171,15 +219,23 @@ int main(int argc, char **argv) {
      *      compress output - yes/no?
      *      max streams per core
      *      interfaces to send multicast on
+     *      file with /24s to exclude
+     *      first octet of darknet space
      *      anything else?
      */
 
     /* For now, I'm going to use getopt for config. If our config becomes
      * more complicated or we have so many options that configuration becomes
      * unwieldy, then we can look at using a config file instead.
+     *
+     * UPDATE: yes we definitely need to move to a config file, but I really
+     * hate writing config parsing code...
      */
 
     params.monitorid = 1;
+
+    darkp.first_octet = -1;
+    darkp.excl_file = NULL;
 
     while (1) {
         int option_index = 0;
@@ -189,14 +245,15 @@ int main(int argc, char **argv) {
             { "help", 0, 0, 'h' },
             { "monitorid", 1, 0, 'm' },
             { "beaconport", 1, 0, 'p' },
-            { "compress", 0, 0, 'c' },
             { "groupaddr", 1, 0, 'a' },
             { "sourceaddr", 1, 0, 's' },
             { "mtu", 1, 0, 'M' },
+            { "excludefile", 1, 0, 'E' },
+            { "firstoctet", 1, 0, 'o' },
             { NULL, 0, 0, 0 }
         };
 
-        c = getopt_long(argc, argv, "a:s:d:hm:M:p:c", long_options,
+        c = getopt_long(argc, argv, "a:s:d:hm:M:p:E:o:", long_options,
                 &option_index);
         if (c == -1)
             break;
@@ -211,9 +268,6 @@ int main(int argc, char **argv) {
             case 'p':
                 beaconport = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
                 break;
-            case 'c':
-                params.compressflag = 1;
-                break;
             case 'a':
                 multicastgroup = strdup(optarg);
                 break;
@@ -222,6 +276,12 @@ int main(int argc, char **argv) {
                 break;
             case 'M':
                 mtu = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
+                break;
+            case 'E':
+                darkp.excl_file = optarg;
+                break;
+            case 'o':
+                darkp.first_octet = atoi(optarg);
                 break;
             case 'h':
             default:
@@ -276,8 +336,14 @@ int main(int argc, char **argv) {
     beaconparams.monitorid = params.monitorid;
 
     while (!is_halted()) {
-        errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
-                &params, NULL, NULL, per_dagstream, NULL);
+        if (darkp.excl_file != NULL) {
+            errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
+                    &params, &darkp, create_darkfilter, per_dagstream,
+                    destroy_darkfilter);
+        } else {
+            errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
+                    &params, NULL, NULL, per_dagstream, NULL);
+        }
 
         if (errorstate != 0) {
             break;

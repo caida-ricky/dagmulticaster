@@ -9,7 +9,8 @@ wdcapsniffer_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
 wdcapsniffer_CFLAGS=-I"$(top_srcdir)/libndag-server"
 endif
 
-telescope_SOURCES=telescope.c dagmultiplexer.h common.c
+telescope_SOURCES=telescope.c dagmultiplexer.h common.c darkfilter.c \
+        darkfilter.h
 telescope_LDADD = @ADD_LIBS@ -lndagserver
 telescope_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
 telescope_CFLAGS=-I"$(top_srcdir)/libndag-server"
