@@ -13,7 +13,7 @@
  * via ndag_encap_params_t, can be a different value (but should be
  * less than your MTU!) and should be configurable by the user.
  */
-#define NDAG_MAX_DGRAM_SIZE (1400)
+#define NDAG_MAX_DGRAM_SIZE (9000)
 
 #define NDAG_MAGIC_NUMBER (0x4E444147)
 #define NDAG_EXPORT_VERSION 1

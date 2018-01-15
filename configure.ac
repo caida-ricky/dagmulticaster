@@ -19,6 +19,7 @@ AC_PROG_LIBTOOL
 gcc_PACKED
 
 AC_CHECK_LIB([trace], [trace_get_payload_length],,trace_found=0)
+AC_CHECK_LIB([wandio], [wandio_create],,wandio_found=0)
 AC_CHECK_LIB([dag], [dag_attach_stream],,dag_found=0)
 AC_CHECK_LIB([dagconf], [dag_config_init],,dagconf_found=0)
 AC_CHECK_LIB([pthread], [pthread_create],,pthread_found=0)
@@ -45,6 +46,10 @@ AC_CONFIG_FILES([Makefile libndag-server/Makefile src/Makefile
 
 if test "$trace_found" = 0; then
         AC_MSG_ERROR(Required library libtrace not found; use LDFLAGS to specify library location)
+fi
+
+if test "$wandio_found" = 0; then
+        AC_MSG_ERROR(Required library libwandio not found; use LDFLAGS to specify library location)
 fi
 
 if test "$dag_found" = 0; then

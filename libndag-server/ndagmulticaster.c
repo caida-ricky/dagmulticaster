@@ -135,7 +135,7 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
         struct addrinfo *targetinfo, uint16_t monitorid, uint16_t streamid,
         uint64_t start, uint16_t mtu, int compress) {
 
-    int i;
+    int i, j;
 
     params->sock = sock;
     params->target = targetinfo;
@@ -143,6 +143,7 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
     params->seqno = 1;
     params->starttime = start;
     params->maxdgramsize = mtu;
+    params->monitorid = monitorid;
     params->mmsgbufs = (struct mmsghdr *)calloc(sizeof(struct mmsghdr),
             NDAG_BATCH_SIZE);
 
@@ -151,6 +152,10 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
         params->mmsgbufs[i].msg_hdr.msg_iov = (struct iovec *)malloc(
                 sizeof(struct iovec) * 2);
         params->iovec_count[i] = 2;
+        for (j = 0; j < params->iovec_count[i]; j++) {
+            params->mmsgbufs[i].msg_hdr.msg_iov[j].iov_base = NULL;
+            params->mmsgbufs[i].msg_hdr.msg_iov[j].iov_len = 0;
+        }
     }
 
 }

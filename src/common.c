@@ -367,7 +367,7 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     /* Create reading thread for each available stream */
 
     for (i = 0; i < maxstreams; i++) {
-        dagstreamthread_t *dst = &(dagthreads[threadcount]);
+        dagstreamthread_t *dst = &(dagthreads[i]);
         if (initfunc) {
             extra = initfunc(initdata);
             dst->extra = extra;
