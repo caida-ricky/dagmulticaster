@@ -28,14 +28,41 @@ typedef struct dsthread {
     streamparams_t params;
     pthread_t tid;
 
+    struct iovec *iovs;
+    uint16_t iov_alloc;
+    uint8_t streamstarted;
+    uint32_t idletime;
+
+    void *extra;
 
 } dagstreamthread_t;
 
 
 typedef struct beaconthread {
     pthread_t tid;
-    ndag_beacon_params_t params;
+    ndag_beacon_params_t *params;
 } beaconthread_t;
+
+
+inline int is_paused(void);
+inline int is_halted(void);
+inline void halt_program(void);
+inline void pause_program(void);
+
+int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state);
+void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
+        uint16_t(*walk_records)(char **, char *, dagstreamthread_t *,
+            uint16_t *, ndag_encap_params_t *));
+void halt_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state);
+int create_multiplex_beaconer(beaconthread_t *bthread);
+int run_dag_streams(int dagfd, uint16_t firstport,
+        ndag_beacon_params_t *bparams,
+        streamparams_t *sparams,
+        void *initdata,
+        void *(*initfunc)(void *),
+        void *(*processfunc)(void *),
+        void (*destroyfunc)(void *));
+
 
 #endif
 
