@@ -23,19 +23,19 @@
 volatile int halted = 0;
 volatile int paused = 0;
 
-inline int is_paused(void) {
+extern inline int is_paused(void) {
     return paused;
 }
 
-inline int is_halted(void) {
+extern inline int is_halted(void) {
     return halted;
 }
 
-inline void halt_program(void) {
+extern inline void halt_program(void) {
     halted = 1;
 }
 
-inline void pause_program(void) {
+extern inline void pause_program(void) {
     if (paused) {
         paused = 0;
     } else {
