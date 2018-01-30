@@ -220,7 +220,7 @@ static uint16_t parse_streamed_record(streamsock_t *ssock, int threadindex,
         /* TODO deal with seqno wrap, reordering... */
         if (ssock->expectedseq != 0 &&
                 ntohl(encaphdr->seqno) != ssock->expectedseq) {
-            fprintf(stderr, "Missing %lu records from %s:%u  (%u:%u)\n",
+            fprintf(stderr, "Missing %u records from %s:%u  (%u:%u)\n",
                     ntohl(encaphdr->seqno) - ssock->expectedseq,
                     ssock->groupaddr, ssock->port, ntohs(commonhdr->monitorid),
                     ntohs(encaphdr->streamid));
@@ -588,7 +588,7 @@ static int create_control_thread(controlparams_t *cparams) {
 
 static void print_help(char *progname) {
     fprintf(stderr,
-        "Usage: %s [ -a multicastaddr ] [ -p beaconport ] [ -t maxthreads ]\n",
+        "Usage: %s [ -a multicastaddr ] [ -p beaconport ] [ -t maxthreads ]\n"
         "          [ -s localiface ]\n",
         progname);
 
