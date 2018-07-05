@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <dagapi.h>
+#include <pthread.h>
 
 #include "byteswap.h"
 #include "ndagmulticaster.h"
@@ -289,9 +290,8 @@ int ndag_send_encap_libtrace(int sock, libtrace_packet_t *packet) {
 int ndag_send_keepalive(ndag_encap_params_t *params) {
 
     char *alive = (char *)malloc(sizeof(ndag_common_t));
-    char *next;
 
-    next = populate_common_header(alive, params->monitorid, NDAG_PKT_KEEPALIVE);
+    populate_common_header(alive, params->monitorid, NDAG_PKT_KEEPALIVE);
 
     if (sendto(params->sock, alive, sizeof(ndag_common_t), 0,
             params->target->ai_addr, params->target->ai_addrlen) !=
@@ -345,8 +345,6 @@ static uint32_t construct_beacon(char **buffer, ndag_beacon_params_t *nparams) {
 void *ndag_start_beacon(void *params) {
 
     ndag_beacon_params_t *nparams = (ndag_beacon_params_t *)params;
-    ndag_common_t restarted;
-    char *unused = NULL;
     int beacsock;
     char *beaconrec = NULL;
     uint32_t beacsize = 0;

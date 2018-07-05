@@ -62,7 +62,7 @@ static int get_nb_cores() {
 static int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
         uint16_t streamnum) {
 
-    int i, cpuid;
+    int i, cpuid = -1;
     dag_card_ref_t cardref = NULL;
     dag_component_t root = NULL;
     dag_component_t streamconf = NULL;
@@ -96,7 +96,6 @@ static int get_next_thread_cpu(char *dagdevname, uint8_t *cpumap,
 endcpucheck:
     dag_config_dispose(cardref);
     return cpuid;
-
 }
 
 int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
@@ -153,7 +152,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
     void *bottom, *top;
     struct timeval timetaken, endtime, starttime;
     uint64_t allrecords = 0;
-    int savedtosend = 0;
+    //int savedtosend = 0;
 
     bottom = NULL;
     top = NULL;
@@ -162,7 +161,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
     gettimeofday(&starttime, NULL);
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
-        uint16_t records_walked = 0;
+        // uint16_t records_walked = 0;
         uint16_t savedtosend = 0;
 
         top = dag_advance_stream(dst->params.dagfd, dst->params.streamnum,
@@ -199,8 +198,8 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
     gettimeofday(&endtime, NULL);
     timersub(&endtime, &starttime, &timetaken);
     fprintf(stderr, "Halting stream %d after processing %lu records in %d.%d seconds\n",
-            dst->params.streamnum, allrecords, timetaken.tv_sec,
-            timetaken.tv_usec);
+            dst->params.streamnum, allrecords, (int)timetaken.tv_sec,
+            (int)timetaken.tv_usec);
 
 }
 
@@ -230,7 +229,7 @@ int create_multiplex_beaconer(beaconthread_t *bthread) {
 #ifdef __linux__
     pthread_attr_t attrib;
     cpu_set_t cpus;
-    int i;
+    //int i;
 #endif
 
 #ifdef __linux__
@@ -265,7 +264,7 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
 #ifdef __linux__
     pthread_attr_t attrib;
     cpu_set_t cpus;
-    int i;
+    //int i;
 #endif
 
     /* Attach to a stream */

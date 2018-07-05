@@ -553,7 +553,7 @@ static void *control_thread_run(void *threaddata) {
 
     }
 
-exitcontrol:
+//exitcontrol:
     if (sock >= 0) {
         close(sock);
     }
@@ -603,7 +603,7 @@ int main(int argc, char **argv) {
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     controlparams_t cparams;
-    uint16_t nextthreadid = 0;
+    //uint16_t nextthreadid = 0;
 
     while (1) {
         int option_index = 0;
