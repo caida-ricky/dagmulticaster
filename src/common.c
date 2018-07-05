@@ -23,24 +23,19 @@
 volatile int halted = 0;
 volatile int paused = 0;
 
-extern inline int is_paused(void) {
-    return paused;
+extern inline int is_paused(void);
+extern inline int is_halted(void);
+extern inline void halt_program(void);
+extern inline void pause_program(void);
+
+void halt_signal(int signal) {
+    (void) signal;
+    halt_program();
 }
 
-extern inline int is_halted(void) {
-    return halted;
-}
-
-extern inline void halt_program(void) {
-    halted = 1;
-}
-
-extern inline void pause_program(void) {
-    if (paused) {
-        paused = 0;
-    } else {
-        paused = 1;
-    }
+void toggle_pause_signal(int signal) {
+    (void) signal;
+    pause_program();
 }
 
 static int get_nb_cores() {
@@ -461,7 +456,6 @@ halteverything:
 
     free(cpumap);
     return errorstate;
-
 }
 
 

@@ -25,16 +25,6 @@
 
 #define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
 
-static void halt_signal(int signal) {
-    (void) signal;
-    halt_program();
-}
-
-static void toggle_pause_signal(int signal) {
-    (void) signal;
-    pause_program();
-}
-
 static char *walk_stream_buffer(char *bottom, char *top,
         uint16_t *reccount, uint16_t *curiov,
         dagstreamthread_t *dst, wdcapdata_t *wdcap) {

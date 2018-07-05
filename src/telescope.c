@@ -24,17 +24,6 @@
 
 #define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
 
-static void halt_signal(int signal) {
-    (void) signal;
-    halt_program();
-}
-
-static void toggle_pause_signal(int signal) {
-    (void) signal;
-    pause_program();
-}
-
-
 static char * walk_stream_buffer(char *bottom, char *top,
         uint16_t *reccount, uint16_t *curiov, dagstreamthread_t *dst,
         darkfilter_t *filter) {
@@ -207,6 +196,7 @@ int main(int argc, char **argv) {
     uint16_t firstport;
     struct timeval starttime;
     darkfilter_params_t darkp;
+    struct sigaction sigact;
 
     srand((unsigned) time(&t));
 
@@ -309,6 +299,18 @@ int main(int argc, char **argv) {
         goto finalcleanup;
     }
 
+    /* Set signal callbacks */
+    /* Interrupt for halt, hup to toggle pause */
+    sigact.sa_handler = toggle_pause_signal;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = SA_RESTART;
+    sigaction(SIGHUP, &sigact, NULL);
+
+    sigact.sa_handler = halt_signal;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = SA_RESTART;
+    sigaction(SIGINT, &sigact, NULL);
+    sigaction(SIGTERM, &sigact, NULL);
 
     /* Open DAG card */
     fprintf(stderr, "Attempting to open DAG device: %s\n", dagdev);
@@ -355,7 +357,6 @@ int main(int argc, char **argv) {
         }
     }
 
-// halteverything:
     fprintf(stderr, "Shutting down DAG multiplexer.\n");
 
     /* Close DAG card */

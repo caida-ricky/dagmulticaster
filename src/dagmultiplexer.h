@@ -43,11 +43,31 @@ typedef struct beaconthread {
     ndag_beacon_params_t *params;
 } beaconthread_t;
 
+extern volatile int halted;
+extern volatile int paused;
 
-inline int is_paused(void);
-inline int is_halted(void);
-inline void halt_program(void);
-inline void pause_program(void);
+inline int is_paused(void) {
+    return paused;
+}
+
+inline int is_halted(void) {
+    return halted;
+}
+
+inline void halt_program(void) {
+    halted = 1;
+}
+
+inline void pause_program(void) {
+    if (paused) {
+        paused = 0;
+    } else {
+        paused = 1;
+    }
+}
+
+void halt_signal(int signal);
+void toggle_pause_signal(int signal);
 
 int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state);
 void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
