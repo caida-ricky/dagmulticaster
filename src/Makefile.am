@@ -1,17 +1,17 @@
-bin_PROGRAMS=telescope
+bin_PROGRAMS=ndag-telescope
 
 if HAVE_WDCAP
-bin_PROGRAMS+=wdcapsniffer
+bin_PROGRAMS+=ndag-wdcapsniffer
 
-wdcapsniffer_SOURCES=wdcapsniffer.c dagmultiplexer.h wdcapsniffer.h common.c
-wdcapsniffer_LDADD = @ADD_LIBS@ @EXTRA_LIBS@ -lndagserver
-wdcapsniffer_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
-wdcapsniffer_CFLAGS=-I"$(top_srcdir)/libndag-server"
+ndag_wdcapsniffer_SOURCES=wdcapsniffer.c dagmultiplexer.h wdcapsniffer.h common.c
+ndag_wdcapsniffer_LDADD = @ADD_LIBS@ @EXTRA_LIBS@ -lndagserver
+ndag_wdcapsniffer_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
+ndag_wdcapsniffer_CFLAGS=-I"$(top_srcdir)/libndag-server"
 endif
 
-telescope_SOURCES=telescope.c dagmultiplexer.h common.c darkfilter.c \
+ndag_telescope_SOURCES=telescope.c dagmultiplexer.h common.c darkfilter.c \
         darkfilter.h
-telescope_LDADD = @ADD_LIBS@ -lndagserver
-telescope_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
-telescope_CFLAGS=-I"$(top_srcdir)/libndag-server"
+ndag_telescope_LDADD = @ADD_LIBS@ -lndagserver
+ndag_telescope_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
+ndag_telescope_CFLAGS=-I"$(top_srcdir)/libndag-server"
 
