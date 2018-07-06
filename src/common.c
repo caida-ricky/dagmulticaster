@@ -141,23 +141,50 @@ int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
     return sock;
 }
 
+static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
+    fprintf(stderr,
+            "STATS %d stream:%d "
+            "walked_buffers:%"PRIu64" "
+            "walked_records:%"PRIu64" "
+            "tx_datagrams:%"PRIu64" "
+            "tx_records:%"PRIu64"\n",
+            (int)now.tv_sec,
+            dst->params.streamnum,
+            dst->stats.walked_buffers,
+            dst->stats.walked_records,
+            dst->stats.tx_datagrams,
+            dst->stats.tx_records);
+}
+
 void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         uint16_t(*walk_records)(char **, char *, dagstreamthread_t *,
                 uint16_t *, ndag_encap_params_t *)) {
     void *bottom, *top;
-    struct timeval timetaken, endtime, starttime;
+    struct timeval timetaken, endtime, starttime, now;
+    uint32_t next_log = 0;
+    uint16_t reccnt = 0;
     uint64_t allrecords = 0;
-    //int savedtosend = 0;
 
     bottom = NULL;
     top = NULL;
 
     fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
     gettimeofday(&starttime, NULL);
+    if (dst->params.loginterval) {
+        next_log = ((starttime.tv_sec / dst->params.loginterval) *
+                    dst->params.loginterval) + dst->params.loginterval;
+    }
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
-        // uint16_t records_walked = 0;
         uint16_t savedtosend = 0;
+
+        // should we log stats now?
+        // TODO: consider checking the time every N iterations
+        gettimeofday(&now, NULL);
+        if (now.tv_sec >= next_log) {
+            log_stats(dst, now);
+            next_log += dst->params.loginterval;
+        }
 
         top = dag_advance_stream(dst->params.dagfd, dst->params.streamnum,
                 (uint8_t **)(&bottom));
@@ -181,8 +208,13 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
 
         ndag_reset_encap_state(state);
 
-        allrecords += walk_records((char **)(&bottom), (char *)top, dst,
+        reccnt = walk_records((char **)(&bottom), (char *)top, dst,
                 &savedtosend, state);
+        dst->stats.walked_buffers++;
+        allrecords += reccnt;
+        dst->stats.tx_records += reccnt;
+        dst->stats.tx_datagrams += savedtosend;
+
         if (savedtosend > 0) {
             if (ndag_send_encap_records(state, savedtosend) == 0) {
                 break;
@@ -195,7 +227,6 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
     fprintf(stderr, "Halting stream %d after processing %lu records in %d.%d seconds\n",
             dst->params.streamnum, allrecords, (int)timetaken.tv_sec,
             (int)timetaken.tv_usec);
-
 }
 
 void halt_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
@@ -376,6 +407,7 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         dst->params.exportport = firstport + (i * DAG_MULTIPLEX_PORT_INCR);
         dst->params.streamnum = i * 2;
         dst->streamstarted = 0;
+        memset(&dst->stats, 0, sizeof(streamstats_t));
 
         assert(dst->params.exportport <= 65534);
 

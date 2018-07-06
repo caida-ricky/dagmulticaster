@@ -71,7 +71,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
             }
 
             if (ret == 0) {
-
+                /* increment number of records walked */
+                dst->stats.walked_records++;
                 /* Skipping packet, so end current iovec if it has something
                  * in it already. */
                 if (dst->iovs[*curiov].iov_len == 0) {
@@ -103,6 +104,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
         walked += len;
         bottom += len;
         (*reccount)++;
+        dst->stats.walked_records++;
     }
 
     /* walked can be larger than maxsize if the first record is
@@ -129,7 +131,6 @@ uint16_t telescope_walk_records(char **bottom, char *top,
      *      that top is moved forward, so we can't guarantee we won't end
      *      up with too much data to fit in one datagram.
      */
-
 
     do {
         records_walked = 0;

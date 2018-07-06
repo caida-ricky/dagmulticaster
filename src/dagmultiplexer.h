@@ -24,9 +24,21 @@ typedef struct streamparams {
     int loginterval;
 } streamparams_t;
 
+typedef struct streamstats {
+
+    uint64_t walked_buffers; // number of stream buffers walked
+    uint64_t walked_records; // number of ERF records (packets) walked
+    uint64_t tx_datagrams; // number of multicast datagrams tx'd
+    uint64_t tx_records; // number of ERF records (packets) tx'd
+
+    // TODO drops
+
+} streamstats_t;
+
 typedef struct dsthread {
 
     streamparams_t params;
+    streamstats_t stats;
     pthread_t tid;
     int threadstarted;
 
