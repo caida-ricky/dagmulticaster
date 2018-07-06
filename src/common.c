@@ -390,6 +390,7 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         if (ret == 0)
             continue;
 
+        dst->threadstarted = 1;
         threadcount += 1;
     }
 
@@ -434,11 +435,12 @@ halteverything:
     if (dagthreads) {
         if (errorstate) {
             halt_program();
-            for (i = 0; i < maxstreams; i++) {
-                pthread_join(dagthreads[i].tid, NULL);
+            for (i = 0; i < threadcount; i++) {
+                if (dagthreads[i].threadstarted)
+                    pthread_join(dagthreads[i].tid, NULL);
             }
         }
-        for (i = 0; i < maxstreams; i++) {
+        for (i = 0; i < threadcount; i++) {
             dagstreamthread_t *dst = &(dagthreads[i]);
             free(dst->iovs);
             if (destroyfunc) {

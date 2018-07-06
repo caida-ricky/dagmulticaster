@@ -27,6 +27,7 @@ typedef struct dsthread {
 
     streamparams_t params;
     pthread_t tid;
+    int threadstarted;
 
     struct iovec *iovs;
     uint16_t iov_alloc;
