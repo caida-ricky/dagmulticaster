@@ -16,6 +16,8 @@
 #include <libtrace.h>
 #include <numa.h>
 
+#include <wandio.h>
+
 #include "byteswap.h"
 #include "dagmultiplexer.h"
 #include "ndagmulticaster.h"
@@ -142,18 +144,49 @@ int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
 }
 
 static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
-    fprintf(stderr,
-            "STATS %d stream:%d "
-            "walked_buffers:%"PRIu64" "
-            "walked_records:%"PRIu64" "
-            "tx_datagrams:%"PRIu64" "
-            "tx_records:%"PRIu64"\n",
-            (int)now.tv_sec,
-            dst->params.streamnum,
-            dst->stats.walked_buffers,
-            dst->stats.walked_records,
-            dst->stats.tx_datagrams,
-            dst->stats.tx_records);
+    iow_t *logf = NULL;
+    char buf[1024];
+
+    if (dst->params.statdir) {
+        snprintf(buf, sizeof(buf), "%s/ndag.stream-%02d.stats",
+                 dst->params.statdir, dst->params.streamnum);
+        if ((logf = wandio_wcreate(buf, WANDIO_COMPRESS_NONE,
+                                   0, O_CREAT)) == NULL) {
+            /* could be transient failure, so just log and move on */
+            fprintf(stderr, "Failed to create stats file %s\n", buf);
+            return;
+        }
+        snprintf(buf, sizeof(buf),
+                 "time %d\n"
+                 "stats_interval %d\n"
+                 "stream %d\n"
+                 "walked_buffers %"PRIu64"\n"
+                 "walked_records %"PRIu64"\n"
+                 "tx_datagrams %"PRIu64"\n"
+                 "tx_records %"PRIu64"\n",
+                 (int)now.tv_sec,
+                 dst->params.statinterval,
+                 dst->params.streamnum,
+                 dst->stats.walked_buffers,
+                 dst->stats.walked_records,
+                 dst->stats.tx_datagrams,
+                 dst->stats.tx_records);
+        wandio_wwrite(logf, buf, strlen(buf));
+        wandio_wdestroy(logf);
+    } else {
+        fprintf(stderr,
+                "STATS %d stream:%d "
+                "walked_buffers:%"PRIu64" "
+                "walked_records:%"PRIu64" "
+                "tx_datagrams:%"PRIu64" "
+                "tx_records:%"PRIu64"\n",
+                (int)now.tv_sec,
+                dst->params.streamnum,
+                dst->stats.walked_buffers,
+                dst->stats.walked_records,
+                dst->stats.tx_datagrams,
+                dst->stats.tx_records);
+    }
 }
 
 void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
@@ -161,7 +194,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
                 uint16_t *, ndag_encap_params_t *)) {
     void *bottom, *top;
     struct timeval timetaken, endtime, starttime, now;
-    uint32_t next_log = 0;
+    uint32_t nextstat = 0;
     uint16_t reccnt = 0;
     uint64_t allrecords = 0;
 
@@ -170,9 +203,9 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
 
     fprintf(stderr, "In main per-thread loop: %d\n", dst->params.streamnum);
     gettimeofday(&starttime, NULL);
-    if (dst->params.loginterval) {
-        next_log = ((starttime.tv_sec / dst->params.loginterval) *
-                    dst->params.loginterval) + dst->params.loginterval;
+    if (dst->params.statinterval) {
+        nextstat = ((starttime.tv_sec / dst->params.statinterval) *
+                    dst->params.statinterval) + dst->params.statinterval;
     }
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
@@ -181,9 +214,9 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         // should we log stats now?
         // TODO: consider checking the time every N iterations
         gettimeofday(&now, NULL);
-        if (now.tv_sec >= next_log) {
+        if (now.tv_sec >= nextstat) {
             log_stats(dst, now);
-            next_log += dst->params.loginterval;
+            nextstat += dst->params.statinterval;
         }
 
         top = dag_advance_stream(dst->params.dagfd, dst->params.streamnum,
