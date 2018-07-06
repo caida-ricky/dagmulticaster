@@ -21,6 +21,7 @@ typedef struct streamparams {
     char *dagdevname;
     uint64_t globalstart;
     uint16_t mtu;
+    int loginterval;
 } streamparams_t;
 
 typedef struct dsthread {

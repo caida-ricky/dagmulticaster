@@ -176,7 +176,8 @@ void print_help(char *progname) {
     fprintf(stderr,
         "Usage: %s [ -d dagdevice ] [ -p beaconport ] [ -m monitorid ] \n"
         "          [ -a multicastaddress ] [ -s sourceaddress ]\n"
-        "          [ -M exportmtu ] [ -E exclusionfile ] [ -o darknetoctet ]\n",
+        "          [ -M exportmtu ] [ -E exclusionfile ] [ -o darknetoctet ]\n"
+        "          [ -l loginterval ]\n",
         progname);
 
 }
@@ -192,6 +193,7 @@ int main(int argc, char **argv) {
     ndag_beacon_params_t beaconparams;
     uint16_t beaconport = 9001;
     uint16_t mtu = 1400;
+    int log_interval = 0;
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
@@ -241,10 +243,11 @@ int main(int argc, char **argv) {
             { "mtu", 1, 0, 'M' },
             { "excludefile", 1, 0, 'E' },
             { "firstoctet", 1, 0, 'o' },
+            { "loginterval", 1, 0, 'l' },
             { NULL, 0, 0, 0 }
         };
 
-        c = getopt_long(argc, argv, "a:s:d:hm:M:p:E:o:", long_options,
+        c = getopt_long(argc, argv, "a:s:d:hm:M:p:E:o:l:", long_options,
                 &option_index);
         if (c == -1)
             break;
@@ -273,6 +276,9 @@ int main(int argc, char **argv) {
                 break;
             case 'o':
                 darkp.first_octet = atoi(optarg);
+                break;
+            case 'l':
+                log_interval = atoi(optarg);
                 break;
             case 'h':
             default:
@@ -325,6 +331,7 @@ int main(int argc, char **argv) {
     params.multicastgroup = multicastgroup;
     params.sourceaddr = sourceaddr;
     params.mtu = mtu;
+    params.loginterval = log_interval;
 
     gettimeofday(&starttime, NULL);
     params.globalstart = bswap_host_to_be64(
