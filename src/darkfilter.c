@@ -161,20 +161,6 @@ int apply_darkfilter(darkfilter_t *state) {
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
 
-    /* Only allocate memory for exclude array once we need it */
-    if (state->exclude == NULL && state->excl_file != NULL) {
-        if ((state->exclude = malloc(sizeof(uint8_t) * EXCLUDE_LEN)) == NULL) {
-            return -1;
-        }
-
-        memset(state->exclude, 0, sizeof(uint8_t) * EXCLUDE_LEN);
-
-        if (parse_excl_file(state, state->excl_file) != 0) {
-            state->excl_file = NULL;
-            return 1;
-        }
-    }
-
     /* check for ipv4 */
     if((ip_hdr = trace_get_ip(state->packet)) == NULL) {
         /* not an ip packet */
@@ -213,30 +199,39 @@ void *create_darkfilter(void *params) {
     state->exclude = NULL;
     state->excl_file = args->excl_file;
 
+    if ((state->exclude = malloc(sizeof(uint8_t) * EXCLUDE_LEN)) == NULL) {
+      goto err;
+    }
+    memset(state->exclude, 0, sizeof(uint8_t) * EXCLUDE_LEN);
+
+    if (parse_excl_file(state, state->excl_file) != 0) {
+      state->excl_file = NULL;
+      goto err;
+    }
+
     return (void *)state;
 
+ err:
+    destroy_darkfilter(state);
+    return NULL;
 }
 
 void destroy_darkfilter(void *data) {
     darkfilter_t *state = (darkfilter_t *)data;
 
-    if (state && state->exclude) {
-        free(state->exclude);
+    if (!state) {
+      return;
     }
 
-    if (state && state->packet) {
-        trace_destroy_packet(state->packet);
-    }
+    free(state->exclude);
 
-    if (state && state->dummytrace) {
+    if (state->packet) {
+      trace_destroy_packet(state->packet);
+    }
+    if (state->dummytrace) {
         trace_destroy_dead(state->dummytrace);
     }
-
-    if (state) {
-        free(state);
-    }
-
-
+    free(state);
 }
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
