@@ -22,14 +22,11 @@
 #include "byteswap.h"
 #include "darkfilter.h"
 
-#define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
-
 static char * walk_stream_buffer(char *bottom, char *top,
         uint16_t *reccount, uint16_t *curiov, dagstreamthread_t *dst,
         darkfilter_t *filter) {
 
     uint32_t walked = 0;
-    uint16_t streamnum = dst->params.streamnum;
     uint16_t maxsize = dst->params.mtu - ENCAP_OVERHEAD;
     int ret;
 
@@ -43,10 +40,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
         uint16_t lctr = ntohs(erfhdr->lctr);
 
         if (lctr != 0) {
-            fprintf(stderr, "Loss counter for stream %u is %u\n", streamnum,
-                    lctr);
-            halt_program();
-            return bottom;
+            dst->stats.dropped_records += lctr;
         }
 
         if (top - bottom < len) {
@@ -116,6 +110,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
      * very large. This is intentional; the multicaster will truncate the
      * packet record if it is too big and set the truncation flag.
      */
+    if (walked > maxsize) {
+        dst->stats.truncated_records++;
+    }
 
     return bottom;
 

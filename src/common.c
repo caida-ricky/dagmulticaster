@@ -165,7 +165,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  "walked_bytes %"PRIu64"\n"
                  "tx_datagrams %"PRIu64"\n"
                  "tx_records %"PRIu64"\n"
-                 "tx_bytes %"PRIu64"\n",
+                 "tx_bytes %"PRIu64"\n"
+                 "dropped_records %"PRIu64"\n"
+                 "truncated_records %"PRIu64"\n",
                  (int)now.tv_sec,
                  dst->params.statinterval,
                  dst->params.streamnum,
@@ -174,7 +176,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  dst->stats.walked_bytes,
                  dst->stats.tx_datagrams,
                  dst->stats.tx_records,
-                 dst->stats.tx_bytes);
+                 dst->stats.tx_bytes,
+                 dst->stats.dropped_records,
+                 dst->stats.truncated_records);
         wandio_wwrite(logf, buf, strlen(buf));
         wandio_wdestroy(logf);
     } else {
@@ -184,8 +188,10 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 "walked_records:%"PRIu64" "
                 "walked_bytes:%"PRIu64" "
                 "tx_datagrams:%"PRIu64" "
-                "tx_bytes:%"PRIu64"\n"
-                "tx_records:%"PRIu64"\n",
+                "tx_bytes:%"PRIu64" "
+                "tx_records:%"PRIu64" "
+                "dropped_records:%"PRIu64" "
+                "truncated_records %"PRIu64"\n",
                 (int)now.tv_sec,
                 dst->params.streamnum,
                 dst->stats.walked_buffers,
@@ -193,7 +199,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 dst->stats.walked_bytes,
                 dst->stats.tx_datagrams,
                 dst->stats.tx_records,
-                dst->stats.tx_bytes);
+                dst->stats.tx_bytes,
+                dst->stats.dropped_records,
+                dst->stats.truncated_records);
     }
 }
 
@@ -256,8 +264,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         dst->stats.tx_records += reccnt;
         dst->stats.tx_datagrams += savedtosend;
         /* account for message headers: */
-        dst->stats.tx_bytes +=
-            savedtosend * (sizeof(ndag_common_t) + sizeof(ndag_encap_t));
+        dst->stats.tx_bytes += savedtosend * ENCAP_OVERHEAD;
 
         if (savedtosend > 0) {
             if (ndag_send_encap_records(state, savedtosend) == 0) {

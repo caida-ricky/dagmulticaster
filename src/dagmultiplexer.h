@@ -8,6 +8,8 @@
 #define DAG_MULTIPLEX_PORT_INCR 2
 #define DAG_MULTIPLEX_BEACON_FREQ 1000      // milliseconds
 
+#define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
+
 #include "ndagmulticaster.h"
 
 typedef struct streamparams {
@@ -27,14 +29,19 @@ typedef struct streamparams {
 
 typedef struct streamstats {
 
+    /* DAG stream walking stats */
     uint64_t walked_buffers; // number of stream buffers walked
     uint64_t walked_records; // number of ERF records (packets) walked
     uint64_t walked_bytes; // number of bytes walked
+
+    /* nDAG transmit stats */
     uint64_t tx_datagrams; // number of multicast datagrams tx'd
     uint64_t tx_records; // number of ERF records (packets) tx'd
     uint64_t tx_bytes; // number of bytes tx'd
 
-    // TODO drops
+    /* error stats */
+    uint64_t dropped_records; // number of records dropped (according to DAG)
+    uint64_t truncated_records; // number of records truncated
 
 } streamstats_t;
 
