@@ -267,7 +267,6 @@ int main(int argc, char **argv) {
     char *sourceaddr = NULL;
     streamparams_t params;
     int dagfd, errorstate;
-    dagstreamthread_t *dagthreads = NULL;
     ndag_beacon_params_t beaconparams;
     uint16_t beaconport = 9001;
     uint16_t mtu = 1400;
@@ -438,7 +437,6 @@ int main(int argc, char **argv) {
         }
     }
 
-halteverything:
     fprintf(stderr, "Shutting down DAG multiplexer.\n");
 
     /* Close DAG card */
