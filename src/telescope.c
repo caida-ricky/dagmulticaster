@@ -65,16 +65,18 @@ static char * walk_stream_buffer(char *bottom, char *top,
             }
 
             if (ret == 0) {
-                /* increment number of records and bytes walked */
+                /* skip this packet */
+
+                /* first, update stats */
                 dst->stats.walked_records++;
                 dst->stats.walked_bytes += len;
-                /* Skipping packet, so end current iovec if it has something
-                 * in it already. */
+                dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
+
+                /* end current iovec if it has something in it already */
                 if (dst->iovs[*curiov].iov_len == 0) {
                     bottom += len;
                     continue;
                 }
-                dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
                 *curiov = *curiov + 1;
                 if (*curiov == dst->iov_alloc) {
                     dst->iovs = (struct iovec *)realloc(dst->iovs,
