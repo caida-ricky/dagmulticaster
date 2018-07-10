@@ -29,8 +29,10 @@ typedef struct streamstats {
 
     uint64_t walked_buffers; // number of stream buffers walked
     uint64_t walked_records; // number of ERF records (packets) walked
+    uint64_t walked_bytes; // number of bytes walked
     uint64_t tx_datagrams; // number of multicast datagrams tx'd
     uint64_t tx_records; // number of ERF records (packets) tx'd
+    uint64_t tx_bytes; // number of bytes tx'd
 
     // TODO drops
 

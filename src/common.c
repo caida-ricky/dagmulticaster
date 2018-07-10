@@ -162,15 +162,19 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  "stream %d\n"
                  "walked_buffers %"PRIu64"\n"
                  "walked_records %"PRIu64"\n"
+                 "walked_bytes %"PRIu64"\n"
                  "tx_datagrams %"PRIu64"\n"
-                 "tx_records %"PRIu64"\n",
+                 "tx_records %"PRIu64"\n"
+                 "tx_bytes %"PRIu64"\n",
                  (int)now.tv_sec,
                  dst->params.statinterval,
                  dst->params.streamnum,
                  dst->stats.walked_buffers,
                  dst->stats.walked_records,
+                 dst->stats.walked_bytes,
                  dst->stats.tx_datagrams,
-                 dst->stats.tx_records);
+                 dst->stats.tx_records,
+                 dst->stats.tx_bytes);
         wandio_wwrite(logf, buf, strlen(buf));
         wandio_wdestroy(logf);
     } else {
@@ -178,14 +182,18 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 "STATS %d stream:%d "
                 "walked_buffers:%"PRIu64" "
                 "walked_records:%"PRIu64" "
+                "walked_bytes:%"PRIu64" "
                 "tx_datagrams:%"PRIu64" "
+                "tx_bytes:%"PRIu64"\n"
                 "tx_records:%"PRIu64"\n",
                 (int)now.tv_sec,
                 dst->params.streamnum,
                 dst->stats.walked_buffers,
                 dst->stats.walked_records,
+                dst->stats.walked_bytes,
                 dst->stats.tx_datagrams,
-                dst->stats.tx_records);
+                dst->stats.tx_records,
+                dst->stats.tx_bytes);
     }
 }
 
