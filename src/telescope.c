@@ -66,15 +66,15 @@ static char * walk_stream_buffer(char *bottom, char *top,
 
             if (ret == 0) {
                 /* skip this packet */
+                bottom += len;
 
-                /* first, update stats */
+                /* update stats */
                 dst->stats.walked_records++;
                 dst->stats.walked_bytes += len;
                 dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
 
                 /* end current iovec if it has something in it already */
                 if (dst->iovs[*curiov].iov_len == 0) {
-                    bottom += len;
                     continue;
                 }
                 *curiov = *curiov + 1;
