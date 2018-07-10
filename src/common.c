@@ -255,6 +255,9 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         allrecords += reccnt;
         dst->stats.tx_records += reccnt;
         dst->stats.tx_datagrams += savedtosend;
+        /* account for message headers: */
+        dst->stats.tx_bytes +=
+            savedtosend * (sizeof(ndag_common_t) + sizeof(ndag_encap_t));
 
         if (savedtosend > 0) {
             if (ndag_send_encap_records(state, savedtosend) == 0) {

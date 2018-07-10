@@ -232,7 +232,7 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
                 sizeof(ndag_common_t) - sizeof(ndag_encap_t)) {
 
         /* Just the one record and it is too big to send, so truncate it */
-	    dag_record_t *erfptr = (dag_record_t *)iovecs[0].iov_base;
+        dag_record_t *erfptr = (dag_record_t *)iovecs[0].iov_base;
         reccount |= 0x8000;
 
         erfptr->rlen = htons(params->maxdgramsize - sizeof(ndag_common_t) -
