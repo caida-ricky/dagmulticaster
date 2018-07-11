@@ -21,7 +21,7 @@
 #define EXCLUDE_LEN (1<<16)
 
 /* semi-hax to ignore the darknet network itself in the exclusion list */
-#define MIN_PFX_LEN 16
+#define MIN_PFX_LEN 15
 
 /* TODO port to libwandio?? */
 static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
