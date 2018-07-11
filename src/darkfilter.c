@@ -152,7 +152,7 @@ err:
 }
 
 
-int apply_darkfilter(darkfilter_t *state) {
+int apply_darkfilter(darkfilter_t *state, libtrace_packet_t *packet) {
     /* Return 1 if packet should NOT be discarded, i.e. it doesn't match
      * any of our exclusion /24s */
 
@@ -162,7 +162,7 @@ int apply_darkfilter(darkfilter_t *state) {
     uint32_t ip_addr;
 
     /* check for ipv4 */
-    if((ip_hdr = trace_get_ip(state->packet)) == NULL) {
+    if((ip_hdr = trace_get_ip(packet)) == NULL) {
         /* not an ip packet */
         goto skip;
     }

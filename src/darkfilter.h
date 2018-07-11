@@ -24,7 +24,7 @@ typedef struct darkfilter_conf {
  * run_dag_streams().
  */
 void *create_darkfilter(void *params);
-int apply_darkfilter(darkfilter_t *state);
+int apply_darkfilter(darkfilter_t *state, libtrace_packet_t *packet);
 void destroy_darkfilter(void *data);
 
 #endif

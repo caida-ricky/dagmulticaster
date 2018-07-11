@@ -57,7 +57,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
                 return bottom;
             }
 
-            ret = apply_darkfilter(filter);
+            ret = apply_darkfilter(filter, filter->packet);
             if (ret < 0) {
                 fprintf(stderr, "Error applying darknet filter to received traffic.\n");
                 halt_program();
