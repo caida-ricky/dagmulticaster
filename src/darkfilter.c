@@ -20,6 +20,9 @@
 /* max number of /24s in a /8 darknet */
 #define EXCLUDE_LEN (1<<16)
 
+/* semi-hax to ignore the darknet network itself in the exclusion list */
+#define MIN_PFX_LEN 16
+
 /* TODO port to libwandio?? */
 static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
 {
@@ -109,6 +112,11 @@ static int parse_excl_file(darkfilter_t *state, const char *excl_file) {
             fprintf(stderr, "ERROR: Malformed prefix for darkfilter: %s/%s\n",
                     buf, mask_str);
             goto err;
+        }
+        if (mask < MIN_PFX_LEN) {
+          fprintf(stderr, "WARN: Ignoring short prefix: %s/%s\n",
+                  buf, mask_str);
+          continue;
         }
         // compute the /24s that this prefix covers
         // perhaps not the most efficient way to do this, but i've borrowed it
