@@ -49,15 +49,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
         }
 
         if (filter) {
-            if (trace_prepare_packet(filter->dummytrace, filter->packet,
-                    bottom, TRACE_RT_DATA_ERF, TRACE_PREP_DO_NOT_OWN_BUFFER)
-                    == -1) {
-                fprintf(stderr, "Unable to convert DAG buffer contents to libtrace packet.\n");
-                halt_program();
-                return bottom;
-            }
-
-            ret = apply_darkfilter(filter, filter->packet);
+            ret = apply_darkfilter(filter, bottom);
             if (ret < 0) {
                 fprintf(stderr, "Error applying darknet filter to received traffic.\n");
                 halt_program();
@@ -203,8 +195,10 @@ int main(int argc, char **argv) {
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
-    darkfilter_params_t darkp;
     struct sigaction sigact;
+    int df_first_octet = -1;
+    char *df_excl_file = NULL;
+    darkfilter_filter_t *darkfilter = NULL;
 
     srand((unsigned) time(&t));
 
@@ -232,9 +226,6 @@ int main(int argc, char **argv) {
      */
 
     params.monitorid = 1;
-
-    darkp.first_octet = -1;
-    darkp.excl_file = NULL;
 
     while (1) {
         int option_index = 0;
@@ -279,10 +270,10 @@ int main(int argc, char **argv) {
                 mtu = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
                 break;
             case 'E':
-                darkp.excl_file = optarg;
+                df_excl_file = optarg;
                 break;
             case 'o':
-                darkp.first_octet = atoi(optarg);
+                df_first_octet = atoi(optarg);
                 break;
             case 'S':
                 statinterval = atoi(optarg);
@@ -356,10 +347,20 @@ int main(int argc, char **argv) {
     beaconparams.frequency = DAG_MULTIPLEX_BEACON_FREQ;
     beaconparams.monitorid = params.monitorid;
 
+    if (df_excl_file) {
+        /* NOTE: when reloading, ensure correct handling of failure to parse. we
+           don't want to stop the multicaster if we get a junk excl file */
+        darkfilter = create_darkfilter_filter(df_first_octet, df_excl_file);
+        if (!darkfilter) {
+            fprintf(stderr, "Failed to create darkfilter filter\n");
+            goto finalcleanup;
+        }
+    }
+
     while (!is_halted()) {
-        if (darkp.excl_file != NULL) {
+        if (darkfilter) {
             errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
-                    &params, &darkp, create_darkfilter, per_dagstream,
+                    &params, darkfilter, create_darkfilter, per_dagstream,
                     destroy_darkfilter);
         } else {
             errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
@@ -381,6 +382,7 @@ int main(int argc, char **argv) {
     dag_close(dagfd);
 
 finalcleanup:
+    destroy_darkfilter_filter(darkfilter);
     free(dagdev);
     free(multicastgroup);
     free(sourceaddr);

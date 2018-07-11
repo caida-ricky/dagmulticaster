@@ -69,7 +69,7 @@ static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
     return i;
 }
 
-static int parse_excl_file(darkfilter_t *state, const char *excl_file) {
+static int parse_excl_file(darkfilter_filter_t *filter, const char *excl_file) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -130,8 +130,8 @@ static int parse_excl_file(darkfilter_t *state, const char *excl_file) {
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
             idx = (x&0x00FFFF00)>>8;
-            if (state->exclude[idx] == 0) {
-                state->exclude[idx] = 1;
+            if (filter->exclude[idx] == 0) {
+                filter->exclude[idx] = 1;
                 cnt++;
             } else {
                 overlaps++;
@@ -151,8 +151,48 @@ err:
     return -1;
 }
 
+darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) {
+    darkfilter_filter_t *filter;
 
-int apply_darkfilter(darkfilter_t *state, libtrace_packet_t *packet) {
+    filter = malloc(sizeof(darkfilter_filter_t));
+    if (!filter) {
+        goto err;
+    }
+
+    if (first_octet < 0 || first_octet > 255) {
+        fprintf(stderr, "ERROR: Invalid first octet for darkfilter: %d\n",
+                first_octet);
+        fprintf(stderr,
+                "Check that you have set the darknet octet option correctly\n");
+        goto err;
+    }
+
+    filter->darknet = first_octet << 24;
+
+    if ((filter->exclude = calloc(EXCLUDE_LEN, sizeof(uint8_t))) == NULL) {
+      goto err;
+    }
+
+    if (parse_excl_file(filter, excl_file) != 0) {
+      goto err;
+    }
+
+    return filter;
+
+ err:
+    destroy_darkfilter_filter(filter);
+    return NULL;
+}
+
+void destroy_darkfilter_filter(darkfilter_filter_t *filter) {
+    if (!filter) {
+        return;
+    }
+    free(filter->exclude);
+    free(filter);
+}
+
+int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
     /* Return 1 if packet should NOT be discarded, i.e. it doesn't match
      * any of our exclusion /24s */
 
@@ -161,15 +201,24 @@ int apply_darkfilter(darkfilter_t *state, libtrace_packet_t *packet) {
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
 
+    /* prepare a libtrace packet */
+    if (trace_prepare_packet(state->dummytrace, state->packet, pktbuf,
+                             TRACE_RT_DATA_ERF,
+                             TRACE_PREP_DO_NOT_OWN_BUFFER) == -1) {
+        fprintf(stderr,
+                "Unable to convert DAG buffer contents to libtrace packet.\n");
+        return -1;
+    }
+
     /* check for ipv4 */
-    if((ip_hdr = trace_get_ip(packet)) == NULL) {
+    if((ip_hdr = trace_get_ip(state->packet)) == NULL) {
         /* not an ip packet */
         goto skip;
     }
     ip_addr = htonl(ip_hdr->ip_dst.s_addr);
 
-    if(((ip_addr & 0xFF000000) != state->darknet) ||
-            (state->exclude[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
+    if(((ip_addr & 0xFF000000) != state->filter->darknet) ||
+            (state->filter->exclude[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
         goto skip;
     }
 
@@ -180,34 +229,17 @@ skip:
 }
 
 void *create_darkfilter(void *params) {
-
-    darkfilter_params_t *args = (darkfilter_params_t *)params;
+    darkfilter_filter_t *filter = (darkfilter_filter_t *)params;
     darkfilter_t *state = NULL;
 
-    if (args->first_octet < 0 || args->first_octet > 255) {
-        fprintf(stderr, "ERROR: Invalid first octet for darkfilter: %d\n",
-                args->first_octet);
-        fprintf(stderr,
-                "Check that you have set the darknet octet option correctly\n");
-        return NULL;
+    state = (darkfilter_t *)malloc(sizeof(darkfilter_t));
+    if (!state) {
+        goto err;
     }
 
-    state = (darkfilter_t *)malloc(sizeof(darkfilter_t));
-    state->darknet = args->first_octet << 24;
+    state->filter = filter;
     state->dummytrace = trace_create_dead("erf:dummy.erf");
     state->packet = trace_create_packet();
-    state->exclude = NULL;
-    state->excl_file = args->excl_file;
-
-    if ((state->exclude = malloc(sizeof(uint8_t) * EXCLUDE_LEN)) == NULL) {
-      goto err;
-    }
-    memset(state->exclude, 0, sizeof(uint8_t) * EXCLUDE_LEN);
-
-    if (parse_excl_file(state, state->excl_file) != 0) {
-      state->excl_file = NULL;
-      goto err;
-    }
 
     return (void *)state;
 
@@ -223,14 +255,13 @@ void destroy_darkfilter(void *data) {
       return;
     }
 
-    free(state->exclude);
-
     if (state->packet) {
       trace_destroy_packet(state->packet);
     }
     if (state->dummytrace) {
         trace_destroy_dead(state->dummytrace);
     }
+
     free(state);
 }
 
