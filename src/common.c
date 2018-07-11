@@ -399,6 +399,16 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
     return 1;
 }
 
+static void dst_destroy(dagstreamthread_t *dst,
+                        void (*destroyfunc)(void *)) {
+    if (!dst->threadstarted) {
+        return;
+    }
+    free(dst->iovs);
+    if (destroyfunc) {
+        destroyfunc(dst->extra);
+    }
+}
 
 int run_dag_streams(int dagfd, uint16_t firstport,
         ndag_beacon_params_t *bparams,
@@ -415,7 +425,6 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     int threadcount = 0;
     beaconthread_t *beaconer = NULL;
     uint8_t *cpumap = NULL;
-    void *extra = NULL;
 
     cpumap = (uint8_t *)malloc(sizeof(uint8_t) * get_nb_cores());
     memset(cpumap, 0, sizeof(uint8_t) * get_nb_cores());
@@ -441,12 +450,12 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     }
 
     /* Create reading thread for each available stream */
-
+    /* note that "available" streams is likely more than the number we're
+       actually using, so several of these will not be used */
     for (i = 0; i < maxstreams; i++) {
         dagstreamthread_t *dst = &(dagthreads[i]);
         if (initfunc) {
-            extra = initfunc(initdata);
-            dst->extra = extra;
+            dst->extra = initfunc(initdata);
         } else {
             dst->extra = NULL;
         }
@@ -470,8 +479,11 @@ int run_dag_streams(int dagfd, uint16_t firstport,
             goto halteverything;
         }
 
-        if (ret == 0)
+        if (ret == 0) {
+            /* we're not going to use this thread, might as well clean up now */
+            dst_destroy(dst, destroyfunc);
             continue;
+        }
 
         dst->threadstarted = 1;
         threadcount += 1;
@@ -524,11 +536,7 @@ halteverything:
             }
         }
         for (i = 0; i < threadcount; i++) {
-            dagstreamthread_t *dst = &(dagthreads[i]);
-            free(dst->iovs);
-            if (destroyfunc) {
-                destroyfunc(dst->extra);
-            }
+            dst_destroy(&(dagthreads[i]), destroyfunc);
         }
         free(dagthreads);
     }
