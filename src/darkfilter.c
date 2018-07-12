@@ -23,6 +23,8 @@
 /* semi-hax to ignore the darknet network itself in the exclusion list */
 #define MIN_PFX_LEN 15
 
+#define CURRENT_EXCLUDE(filter) ((filter)->exclude[(filter)->current_exclude])
+
 /* TODO port to libwandio?? */
 static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
 {
@@ -69,7 +71,7 @@ static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
     return i;
 }
 
-static int parse_excl_file(darkfilter_filter_t *filter, const char *excl_file) {
+static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -114,7 +116,7 @@ static int parse_excl_file(darkfilter_filter_t *filter, const char *excl_file) {
             goto err;
         }
         if (mask < MIN_PFX_LEN) {
-          fprintf(stderr, "WARN: Ignoring short prefix: %s/%s\n",
+          fprintf(stderr, "[darkfilter] WARN: Ignoring short prefix: %s/%s\n",
                   buf, mask_str);
           continue;
         }
@@ -130,8 +132,8 @@ static int parse_excl_file(darkfilter_filter_t *filter, const char *excl_file) {
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
             idx = (x&0x00FFFF00)>>8;
-            if (filter->exclude[idx] == 0) {
-                filter->exclude[idx] = 1;
+            if (exclude[idx] == 0) {
+                exclude[idx] = 1;
                 cnt++;
             } else {
                 overlaps++;
@@ -153,6 +155,7 @@ err:
 
 darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) {
     darkfilter_filter_t *filter;
+    int i;
 
     filter = malloc(sizeof(darkfilter_filter_t));
     if (!filter) {
@@ -167,13 +170,18 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) 
         goto err;
     }
 
+    filter->excl_file = excl_file;
     filter->darknet = first_octet << 24;
 
-    if ((filter->exclude = calloc(EXCLUDE_LEN, sizeof(uint8_t))) == NULL) {
-      goto err;
+    for (i=0; i<2; i++) {
+        if ((filter->exclude[i] =
+             calloc(EXCLUDE_LEN, sizeof(uint8_t))) == NULL) {
+            goto err;
+        }
     }
+    filter->current_exclude = 0;
 
-    if (parse_excl_file(filter, excl_file) != 0) {
+    if (parse_excl_file(CURRENT_EXCLUDE(filter), filter->excl_file) != 0) {
       goto err;
     }
 
@@ -185,11 +193,25 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) 
 }
 
 void destroy_darkfilter_filter(darkfilter_filter_t *filter) {
+    int i;
+
     if (!filter) {
         return;
     }
-    free(filter->exclude);
+    for (i=0; i<2; i++) {
+        free(filter->exclude[i]);
+    }
     free(filter);
+}
+
+int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
+    uint8_t *excl = filter->exclude[!filter->current_exclude];
+    memset(excl, 0, EXCLUDE_LEN);
+    if (parse_excl_file(excl, filter->excl_file) != 0) {
+        return -1;
+    }
+    filter->current_exclude = !filter->current_exclude;
+    return 0;
 }
 
 int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
@@ -218,7 +240,7 @@ int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
     ip_addr = htonl(ip_hdr->ip_dst.s_addr);
 
     if(((ip_addr & 0xFF000000) != state->filter->darknet) ||
-            (state->filter->exclude[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
+       (CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
         goto skip;
     }
 

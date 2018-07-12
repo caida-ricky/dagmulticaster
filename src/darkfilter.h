@@ -6,8 +6,14 @@
 #include <wandio.h>
 
 typedef struct filter {
+
+    char *excl_file;
+
     uint32_t darknet;
-    uint8_t *exclude;
+
+    uint8_t *exclude[2];
+    volatile sig_atomic_t current_exclude;
+
 } darkfilter_filter_t;
 
 typedef struct darkfilter {
@@ -18,6 +24,7 @@ typedef struct darkfilter {
 
 darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file);
 void destroy_darkfilter_filter(darkfilter_filter_t *filter);
+int update_darkfilter_exclusions(darkfilter_filter_t *filter);
 
 /* The create and destroy functions accept and return void ptrs so they
  * can be integrated with the callback functionality provided by

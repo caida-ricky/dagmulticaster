@@ -22,6 +22,14 @@
 #include "byteswap.h"
 #include "darkfilter.h"
 
+static volatile sig_atomic_t reload = 0;
+static pthread_t darkfilter_tid;
+
+static void reload_signal(int signal) {
+    (void) signal;
+    reload = 1;
+}
+
 static char * walk_stream_buffer(char *bottom, char *top,
         uint16_t *reccount, uint16_t *curiov, dagstreamthread_t *dst,
         darkfilter_t *filter) {
@@ -168,6 +176,42 @@ static void *per_dagstream(void *threaddata) {
     pthread_exit(NULL);
 }
 
+static void *darkfilter_reloader(void *threaddata) {
+    darkfilter_filter_t *darkfilter = (darkfilter_filter_t *)threaddata;
+
+    fprintf(stderr, "Darkfilter reloader thread started\n");
+
+    while (!is_halted()) {
+        if (reload) {
+            fprintf(stderr, "Starting darkfilter reload\n");
+            if (update_darkfilter_exclusions(darkfilter) != 0) {
+                /* parsing the file probably failed, so just log the error and
+                   move on */
+                fprintf(stderr, "Failed to reload darkfilter exclusion file\n");
+            }
+            reload = 0;
+        }
+        usleep(1000);
+    }
+
+    pthread_exit(NULL);
+}
+
+static darkfilter_filter_t *init_darkfilter(int first_octet, char *excl_file) {
+    darkfilter_filter_t *darkfilter =
+        create_darkfilter_filter(first_octet, excl_file);
+
+    /* create thread to watch for reload events and trigger exclusion updates */
+    if (pthread_create(&darkfilter_tid, NULL, darkfilter_reloader,
+                       (void *)darkfilter) != 0) {
+        fprintf(stderr, "Failed to create darkfilter reloader thread\n");
+        destroy_darkfilter_filter(darkfilter);
+        return NULL;
+    }
+
+    return darkfilter;
+}
+
 void print_help(char *progname) {
 
     fprintf(stderr,
@@ -307,8 +351,8 @@ int main(int argc, char **argv) {
     }
 
     /* Set signal callbacks */
-    /* Interrupt for halt, hup to toggle pause */
-    sigact.sa_handler = toggle_pause_signal;
+    /* Interrupt for halt, hup to signal darkfilter reload */
+    sigact.sa_handler = reload_signal;
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = SA_RESTART;
     sigaction(SIGHUP, &sigact, NULL);
@@ -348,9 +392,8 @@ int main(int argc, char **argv) {
     beaconparams.monitorid = params.monitorid;
 
     if (df_excl_file) {
-        /* NOTE: when reloading, ensure correct handling of failure to parse. we
-           don't want to stop the multicaster if we get a junk excl file */
-        darkfilter = create_darkfilter_filter(df_first_octet, df_excl_file);
+        /* boot up the things needed for managing the darkfilter */
+        darkfilter = init_darkfilter(df_first_octet, df_excl_file);
         if (!darkfilter) {
             fprintf(stderr, "Failed to create darkfilter filter\n");
             goto finalcleanup;
@@ -382,7 +425,10 @@ int main(int argc, char **argv) {
     dag_close(dagfd);
 
 finalcleanup:
-    destroy_darkfilter_filter(darkfilter);
+    if (darkfilter) {
+        pthread_join(darkfilter_tid, NULL);
+        destroy_darkfilter_filter(darkfilter);
+    }
     free(dagdev);
     free(multicastgroup);
     free(sourceaddr);
