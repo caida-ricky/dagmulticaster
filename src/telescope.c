@@ -35,6 +35,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
         darkfilter_t *filter) {
 
     uint32_t walked = 0;
+    uint32_t wwalked = 0;
+    uint32_t tx_wire = 0;
     uint16_t maxsize = dst->params.mtu - ENCAP_OVERHEAD;
     int ret;
 
@@ -45,6 +47,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
     while (bottom < top && walked < maxsize) {
         dag_record_t *erfhdr = (dag_record_t *)bottom;
         uint16_t len = ntohs(erfhdr->rlen);
+        uint16_t wlen = ntohs(erfhdr->wlen);
         uint16_t lctr = ntohs(erfhdr->lctr);
 
         if (lctr != 0) {
@@ -71,7 +74,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
                 /* update stats */
                 dst->stats.walked_records++;
                 dst->stats.walked_bytes += len;
+                dst->stats.walked_wbytes += wlen;
                 dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
+                dst->stats.tx_wbytes += tx_wire;
 
                 /* end current iovec if it has something in it already */
                 if (dst->iovs[*curiov].iov_len == 0) {
@@ -85,6 +90,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
                 }
                 dst->iovs[*curiov].iov_base = NULL;
                 dst->iovs[*curiov].iov_len = 0;
+                tx_wire = 0;
                 continue;
             }
         }
@@ -98,15 +104,19 @@ static char * walk_stream_buffer(char *bottom, char *top,
             dst->iovs[*curiov].iov_base = bottom;
         }
         dst->iovs[*curiov].iov_len += len;
+        tx_wire += wlen;
 
         walked += len;
+        wwalked += wlen;
         bottom += len;
         (*reccount)++;
         dst->stats.walked_records++;
     }
 
     dst->stats.walked_bytes += walked;
+    dst->stats.walked_wbytes += wwalked;
     dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
+    dst->stats.tx_wbytes += tx_wire;
 
     /* walked can be larger than maxsize if the first record is
      * very large. This is intentional; the multicaster will truncate the
