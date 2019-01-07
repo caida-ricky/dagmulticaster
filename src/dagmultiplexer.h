@@ -33,11 +33,13 @@ typedef struct streamstats {
     uint64_t walked_buffers; // number of stream buffers walked
     uint64_t walked_records; // number of ERF records (packets) walked
     uint64_t walked_bytes; // number of bytes walked
+    uint64_t walked_wbytes; // number of "wire" bytes walked (excl. ERF headers)
 
     /* nDAG transmit stats */
     uint64_t tx_datagrams; // number of multicast datagrams tx'd
     uint64_t tx_records; // number of ERF records (packets) tx'd
     uint64_t tx_bytes; // number of bytes tx'd
+    uint64_t tx_wbytes; // number of "wire" bytes tx'd (excl. ERF headers)
 
     /* error stats */
     uint64_t dropped_records; // number of records dropped (according to DAG)

@@ -163,9 +163,11 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  "walked_buffers %"PRIu64"\n"
                  "walked_records %"PRIu64"\n"
                  "walked_bytes %"PRIu64"\n"
+                 "walked_wire_bytes %"PRIu64"\n"
                  "tx_datagrams %"PRIu64"\n"
                  "tx_records %"PRIu64"\n"
                  "tx_bytes %"PRIu64"\n"
+                 "tx_wire_bytes %"PRIu64"\n"
                  "dropped_records %"PRIu64"\n"
                  "truncated_records %"PRIu64"\n",
                  (int)now.tv_sec,
@@ -174,9 +176,11 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  dst->stats.walked_buffers,
                  dst->stats.walked_records,
                  dst->stats.walked_bytes,
+                 dst->stats.walked_wbytes,
                  dst->stats.tx_datagrams,
                  dst->stats.tx_records,
                  dst->stats.tx_bytes,
+                 dst->stats.tx_wbytes,
                  dst->stats.dropped_records,
                  dst->stats.truncated_records);
         wandio_wwrite(logf, buf, strlen(buf));
@@ -187,9 +191,11 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 "walked_buffers:%"PRIu64" "
                 "walked_records:%"PRIu64" "
                 "walked_bytes:%"PRIu64" "
+                "walked_wire_bytes:%"PRIu64" "
                 "tx_datagrams:%"PRIu64" "
-                "tx_bytes:%"PRIu64" "
                 "tx_records:%"PRIu64" "
+                "tx_bytes:%"PRIu64" "
+                "tx_wire_bytes:%"PRIu64" "
                 "dropped_records:%"PRIu64" "
                 "truncated_records %"PRIu64"\n",
                 (int)now.tv_sec,
@@ -197,9 +203,11 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 dst->stats.walked_buffers,
                 dst->stats.walked_records,
                 dst->stats.walked_bytes,
+                dst->stats.walked_wbytes,
                 dst->stats.tx_datagrams,
                 dst->stats.tx_records,
                 dst->stats.tx_bytes,
+                dst->stats.tx_wbytes,
                 dst->stats.dropped_records,
                 dst->stats.truncated_records);
     }
