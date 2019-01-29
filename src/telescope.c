@@ -17,6 +17,7 @@
 
 #include <numa.h>
 
+#include "telescope.h"
 #include "dagmultiplexer.h"
 #include "ndagmulticaster.h"
 #include "byteswap.h"
@@ -223,35 +224,22 @@ static darkfilter_filter_t *init_darkfilter(int first_octet, char *excl_file) {
 }
 
 void print_help(char *progname) {
-
-    fprintf(stderr,
-        "Usage: %s [ -d dagdevice ] [ -p beaconport ] [ -m monitorid ] \n"
-        "          [ -a multicastaddress ] [ -s sourceaddress ]\n"
-        "          [ -M exportmtu ] [ -E exclusionfile ] [ -o darknetoctet ]\n"
-        "          [ -S statinterval ] [ -D statdir ]\n",
-        progname);
-
+    fprintf(stderr, "Usage: %s -c configfile.yaml\n", progname);
 }
 
 int main(int argc, char **argv) {
-    char *dagdev = NULL;
-    char *multicastgroup = NULL;
-    char *sourceaddr = NULL;
+    telescope_global_t *glob = NULL;
+    char *configfile = NULL;
+
     streamparams_t params;
     int dagfd, errorstate;
     // int i, ret, maxstreams;
     // dagstreamthread_t *dagthreads = NULL;
     ndag_beacon_params_t beaconparams;
-    uint16_t beaconport = 9001;
-    uint16_t mtu = 1400;
-    int statinterval = 0;
-    char *statdir = NULL;
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
     struct sigaction sigact;
-    int df_first_octet = -1;
-    char *df_excl_file = NULL;
     darkfilter_filter_t *darkfilter = NULL;
 
     srand((unsigned) time(&t));
@@ -271,69 +259,23 @@ int main(int argc, char **argv) {
      *      anything else?
      */
 
-    /* For now, I'm going to use getopt for config. If our config becomes
-     * more complicated or we have so many options that configuration becomes
-     * unwieldy, then we can look at using a config file instead.
-     *
-     * UPDATE: yes we definitely need to move to a config file, but I really
-     * hate writing config parsing code...
-     */
-
-    params.monitorid = 1;
-
     while (1) {
         int option_index = 0;
         int c;
         static struct option long_options[] = {
-            { "device", 1, 0, 'd' },
-            { "help", 0, 0, 'h' },
-            { "monitorid", 1, 0, 'm' },
-            { "beaconport", 1, 0, 'p' },
-            { "groupaddr", 1, 0, 'a' },
-            { "sourceaddr", 1, 0, 's' },
-            { "mtu", 1, 0, 'M' },
-            { "excludefile", 1, 0, 'E' },
-            { "firstoctet", 1, 0, 'o' },
-            { "statinterval", 1, 0, 'S' },
-            { "statdir", 1, 0, 'D' },
+            { "config", required_argument, 0, 'c' },
+            { "help",   no_argument,       0, 'h' },
             { NULL, 0, 0, 0 }
         };
 
-        c = getopt_long(argc, argv, "a:s:d:hm:M:p:E:o:S:D:", long_options,
+        c = getopt_long(argc, argv, "c:h", long_options,
                 &option_index);
         if (c == -1)
             break;
 
         switch (c) {
-            case 'd':
-                dagdev = strdup(optarg);
-                break;
-            case 'm':
-                params.monitorid = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
-                break;
-            case 'p':
-                beaconport = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
-                break;
-            case 'a':
-                multicastgroup = strdup(optarg);
-                break;
-            case 's':
-                sourceaddr = strdup(optarg);
-                break;
-            case 'M':
-                mtu = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
-                break;
-            case 'E':
-                df_excl_file = optarg;
-                break;
-            case 'o':
-                df_first_octet = atoi(optarg);
-                break;
-            case 'S':
-                statinterval = atoi(optarg);
-                break;
-            case 'D':
-                statdir = strdup(optarg);
+            case 'c':
+                configfile = strdup(optarg);
                 break;
             case 'h':
             default:
@@ -342,21 +284,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Try to set a sensible default */
-    if (dagdev == NULL) {
-        dagdev = strdup("/dev/dag0");
+    if (configfile == NULL) {
+        print_help(argv[0]);
+        return -1;
     }
-    if (multicastgroup == NULL) {
-        multicastgroup = strdup("225.0.0.225");
-    }
-    if (sourceaddr == NULL) {
-        fprintf(stderr,
-            "Warning: no source address specified. Using default interface.");
-        sourceaddr = strdup("0.0.0.0");
-    }
-    if (params.monitorid == 0) {
-        fprintf(stderr,
-            "0 is not a valid monitor ID -- choose another number.\n");
+
+    if ((glob = telescope_init_global(configfile)) == NULL) {
         goto finalcleanup;
     }
 
@@ -374,20 +307,21 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &sigact, NULL);
 
     /* Open DAG card */
-    fprintf(stderr, "Attempting to open DAG device: %s\n", dagdev);
+    fprintf(stderr, "Attempting to open DAG device: %s\n", glob->dagdev);
 
-    dagfd = dag_open(dagdev);
+    dagfd = dag_open(glob->dagdev);
     if (dagfd < 0) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
         goto finalcleanup;
     }
-    params.dagdevname = dagdev;
+    params.monitorid = glob->monitorid;
+    params.dagdevname = glob->dagdev;
     params.dagfd = dagfd;
-    params.multicastgroup = multicastgroup;
-    params.sourceaddr = sourceaddr;
-    params.mtu = mtu;
-    params.statinterval = statinterval;
-    params.statdir = statdir;
+    params.multicastgroup = glob->mcastaddr;
+    params.sourceaddr = glob->srcaddr;
+    params.mtu = glob->mtu;
+    params.statinterval = glob->statinterval;
+    params.statdir = glob->statdir;
 
     gettimeofday(&starttime, NULL);
     params.globalstart = bswap_host_to_be64(
@@ -395,17 +329,17 @@ int main(int argc, char **argv) {
             (starttime.tv_usec / 1000.0);
     firstport = 10000 + (rand() % 50000);
 
-    beaconparams.srcaddr = sourceaddr;
-    beaconparams.groupaddr = multicastgroup;
-    beaconparams.beaconport = beaconport;
+    beaconparams.srcaddr = glob->srcaddr;
+    beaconparams.groupaddr = glob->mcastaddr;
+    beaconparams.beaconport = glob->mcastport;
     beaconparams.frequency = DAG_MULTIPLEX_BEACON_FREQ;
-    beaconparams.monitorid = params.monitorid;
+    beaconparams.monitorid = glob->monitorid;
 
-    if (df_excl_file) {
+    if (glob->filterfile) {
         /* boot up the things needed for managing the darkfilter */
-        darkfilter = init_darkfilter(df_first_octet, df_excl_file);
+        darkfilter = init_darkfilter(glob->darknetoctet, glob->filterfile);
         if (!darkfilter) {
-            fprintf(stderr, "Failed to create darkfilter filter\n");
+            fprintf(stderr, "Failed to create darkfilter filter.\n");
             goto finalcleanup;
         }
     }
@@ -439,11 +373,10 @@ finalcleanup:
         pthread_join(darkfilter_tid, NULL);
         destroy_darkfilter_filter(darkfilter);
     }
-    free(dagdev);
-    free(multicastgroup);
-    free(sourceaddr);
-    free(statdir);
+    telescope_cleanup_global(glob);
+    if (configfile) {
+        free(configfile);
+    }
 }
-
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

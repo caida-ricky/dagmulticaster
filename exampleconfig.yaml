@@ -1,0 +1,26 @@
+# Example configuration file for telescope.
+#
+# Run telescope as follows:
+#
+#   ndag-telescope -c <path to your config file>
+
+dagdev: /dev/dag0
+
+darknetoctet: 44
+
+statinterval: 60
+
+statdir: /var/log/ndag
+
+mcastaddr: xx.xx.xx.xx
+
+mcastport: 44000
+
+srcaddr: xx.yy.zz.aa
+
+mtu: 8960
+
+filterfile: /path/to/filter
+
+monitorid: 44
+
