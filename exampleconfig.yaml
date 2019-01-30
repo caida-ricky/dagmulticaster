@@ -12,15 +12,21 @@ statinterval: 60
 
 statdir: /var/log/ndag
 
-mcastaddr: xx.xx.xx.xx
-
-mcastport: 44000
-
-srcaddr: xx.yy.zz.aa
-
-mtu: 8960
-
-filterfile: /path/to/filter
-
-monitorid: 44
-
+outputs:
+  -
+    mcastaddr: xx.xx.xx.xx
+    mcastport: 44000
+    srcaddr: xx.yy.zz.aa
+    mtu: 8960
+    filterfile: /path/to/filter1
+    monitorid: 44
+  -
+    mcastaddr: yy.yy.yy.yy
+    mcastport: 44004
+    srcaddr: xx.yy.zz.aa
+    mtu: 8961
+    filterfile: /path/to/filter2
+    monitorid: 45
+  -
+    filterfile: /path/to/filter3
+    # ^ drop packets

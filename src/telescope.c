@@ -292,6 +292,12 @@ int main(int argc, char **argv) {
     if ((glob = telescope_init_global(configfile)) == NULL) {
         goto finalcleanup;
     }
+    if (glob->torrentcount == 0 || glob->torrents == NULL) {
+        fprintf(stderr, "Please specify at least on torrent.\n");
+        goto finalcleanup;
+    }
+
+    torrent_t *torr = glob->torrents;
 
     /* Set signal callbacks */
     /* Interrupt for halt, hup to signal darkfilter reload */
@@ -314,12 +320,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
         goto finalcleanup;
     }
-    params.monitorid = glob->monitorid;
+    params.monitorid = torr->monitorid;
     params.dagdevname = glob->dagdev;
     params.dagfd = dagfd;
-    params.multicastgroup = glob->mcastaddr;
-    params.sourceaddr = glob->srcaddr;
-    params.mtu = glob->mtu;
+    params.multicastgroup = torr->mcastaddr;
+    params.sourceaddr = torr->srcaddr;
+    params.mtu = torr->mtu;
     params.statinterval = glob->statinterval;
     params.statdir = glob->statdir;
 
@@ -329,15 +335,15 @@ int main(int argc, char **argv) {
             (starttime.tv_usec / 1000.0);
     firstport = 10000 + (rand() % 50000);
 
-    beaconparams.srcaddr = glob->srcaddr;
-    beaconparams.groupaddr = glob->mcastaddr;
-    beaconparams.beaconport = glob->mcastport;
+    beaconparams.srcaddr = torr->srcaddr;
+    beaconparams.groupaddr = torr->mcastaddr;
+    beaconparams.beaconport = torr->mcastport;
     beaconparams.frequency = DAG_MULTIPLEX_BEACON_FREQ;
-    beaconparams.monitorid = glob->monitorid;
+    beaconparams.monitorid = torr->monitorid;
 
-    if (glob->filterfile) {
+    if (torr->filterfile) {
         /* boot up the things needed for managing the darkfilter */
-        darkfilter = init_darkfilter(glob->darknetoctet, glob->filterfile);
+        darkfilter = init_darkfilter(glob->darknetoctet, torr->filterfile);
         if (!darkfilter) {
             fprintf(stderr, "Failed to create darkfilter filter.\n");
             goto finalcleanup;
