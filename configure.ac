@@ -43,7 +43,7 @@ AS_IF([test "x$have_wdcap" = "xyes"], [
 AC_CHECK_FUNCS(sendmmsg)
 
 AC_CONFIG_FILES([Makefile libndag-server/Makefile src/Makefile
-                testclient/Makefile])
+                testclient/Makefile wdcapsniffer/Makefile])
 
 if test "$trace_found" = 0; then
         AC_MSG_ERROR(Required library libtrace not found; use LDFLAGS to specify library location)

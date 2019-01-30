@@ -1,4 +1,4 @@
-SUBDIRS=libndag-server src testclient
+SUBDIRS=libndag-server src wdcapsniffer testclient
 
 AUTOMAKE_OPTIONS=foreign
 

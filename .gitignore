@@ -24,5 +24,5 @@ m4/ltversion.m4
 m4/lt~obsolete.m4
 *.tar.gz
 src/ndag-telescope
-src/ndag-wdcapsniffer
+wdcapsniffer/ndag-wdcapsniffer
 testclient/ndag-testclient
