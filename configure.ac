@@ -24,6 +24,7 @@ AC_CHECK_LIB([dag], [dag_attach_stream],,dag_found=0)
 AC_CHECK_LIB([dagconf], [dag_config_init],,dagconf_found=0)
 AC_CHECK_LIB([pthread], [pthread_create],,pthread_found=0)
 AC_CHECK_LIB([numa], [numa_node_of_cpu],,numa_found=0)
+AC_CHECK_LIB([yaml], [yaml_parser_initialize],,yaml_found=0)
 AC_CHECK_LIB([z], [deflate],,zlib_found=0)
 
 EXTRA_LIBS=""
@@ -66,6 +67,10 @@ fi
 
 if test "$numa_found" = 0; then
         AC_MSG_ERROR(Required library libnuma not found; use LDFLAGS to specify library location)
+fi
+
+if test "$yaml_found" = 0; then
+        AC_MSG_ERROR(Required library libyaml not found; use LDFLAGS to specify library location)
 fi
 
 AM_CONDITIONAL([HAVE_WDCAP], [test "x$with_wdcap" != "xno"])
