@@ -28,5 +28,11 @@ outputs:
     filterfile: /path/to/filter2
     monitorid: 45
   -
+    mcastaddr: zz.zz.zz.zz
+    mcastport: 44008
+    srcaddr: xx.yy.zz.aa
+    mtu: 8962
+    monitorid: 46
+  -
     filterfile: /path/to/filter3
     # ^ drop packets

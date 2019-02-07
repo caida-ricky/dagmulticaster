@@ -5,10 +5,12 @@
 #include "telescope.h"
 
 static int parse_torrents(telescope_global_t *glob,
-        yaml_document_t *doc, yaml_node_t *pluginlist) {
+        yaml_document_t *doc, yaml_node_t *torrentlist) {
 
     yaml_node_item_t *item;
     int torrentcount = 0;
+    int onlyfiltercount = 0;
+    int defaultcount = 0;
     torrent_t *current = NULL;
 
     if (glob->torrents != NULL) {
@@ -16,11 +18,9 @@ static int parse_torrents(telescope_global_t *glob,
         return -1;
     }
 
-    printf("starting sequnce\n");
-    for (item = pluginlist->data.sequence.items.start;
-            item != pluginlist->data.sequence.items.top;
+    for (item = torrentlist->data.sequence.items.start;
+            item != torrentlist->data.sequence.items.top;
                 ++item) {
-        printf(" next item\n");
         yaml_node_t *node;
         yaml_node_pair_t *pair;
         int non_filter_entires = 0;
@@ -61,8 +61,6 @@ static int parse_torrents(telescope_global_t *glob,
 
             key = yaml_document_get_node(doc, pair->key);
             value = yaml_document_get_node(doc, pair->value);
-            printf("  key: %s, value: %s\n", (char *)key->data.scalar.value, 
-                    (char *)value->data.scalar.value);
 
             if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                     && !strcmp((char *)key->data.scalar.value, "monitorid")) {
@@ -99,17 +97,25 @@ static int parse_torrents(telescope_global_t *glob,
                 current->filterfile= strdup((char *)value->data.scalar.value);
             }
         }
-        printf(" end item\n");
 
-        /* TODO: Not sure this makes sense in this case. */
+        if (current->filterfile == NULL) {
+            ++defaultcount;
+            if (defaultcount > 1) {
+                fprintf(stderr, "Cannot have more than one default multicast "
+                        "group.\n");
+                goto cleanuptorrents;
+            }
+        }
+
+        /* TODO: Not sure we want to set defaults. */
         if (non_filter_entires > 0) {
             if (current->mcastaddr == NULL) {
                 current->mcastaddr = strdup("225.0.0.225");
             }
 
             if (current->srcaddr == NULL) {
-                fprintf(stderr,
-                    "Warning: no source address specified. Using default interface.\n");
+                fprintf(stderr," Warning: no source address specified. Using "
+                    "default interface.\n");
                 current->srcaddr = strdup("0.0.0.0");
             }
 
@@ -118,13 +124,32 @@ static int parse_torrents(telescope_global_t *glob,
                     "0 is not a valid monitor ID -- choose another number.\n");
                 goto cleanuptorrents;
             }
+        } else if (non_filter_entires == 0 && current->filterfile == NULL) {
+            /* Alternatively just delete this entry? */
+            fprintf(stderr, "Found empty torrent entry. Please fix this.\n");
+            goto cleanuptorrents;
+        } else {
+            /* Entry only has a filter. */
+            onlyfiltercount += 1;             
         }
 
         /* Next torrent. */
         current = current->next;
         ++torrentcount;
     }
-    printf("end sequence (%d items)\n", torrentcount);
+
+    /* There should only be one torrent that drops everything. */
+    if (defaultcount == 0) {
+        fprintf(stderr, "Please specify one default sink, i.e., an entry "
+            "without a filterfile.\n");
+        goto cleanuptorrents;
+    }
+
+    /* Found more than one entry with only a filterfile. */
+    if (onlyfiltercount > 1) {
+        fprintf(stderr, "Warning: More than one entry drops everything.\n");
+    }
+
 
     glob->torrentcount = torrentcount;
     return torrentcount;
@@ -137,11 +162,12 @@ cleanuptorrents:
         current = glob->torrents;
     }
     glob->torrentcount = 0;
-    return 0;
+    return -1;
 }
 
 static int parse_option(telescope_global_t *glob, yaml_document_t *doc,
         yaml_node_t *key, yaml_node_t *value) {
+    int torrentcount = 0;
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "dagdev")) {
@@ -165,7 +191,11 @@ static int parse_option(telescope_global_t *glob, yaml_document_t *doc,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
             && !strcmp((char *)key->data.scalar.value, "outputs")) {
-        glob->torrentcount = parse_torrents(glob, doc, value);
+        torrentcount = parse_torrents(glob, doc, value);
+        if (torrentcount < 0) {
+            return -1;
+        }
+        glob->torrentcount = torrentcount;
     }
 
     return 1;
