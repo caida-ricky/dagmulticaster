@@ -36,7 +36,7 @@ static int parse_torrents(telescope_global_t *glob,
         if (current == NULL) {
             fprintf(stderr, "Failed to allocate memory for torrent config.\n");
             torrentcount = 0;
-            goto cleanuptorrents;
+            goto torrentparseerror;
         }
 
         /* Initialize everything. */
@@ -103,7 +103,7 @@ static int parse_torrents(telescope_global_t *glob,
             if (defaultcount > 1) {
                 fprintf(stderr, "Cannot have more than one default multicast "
                         "group.\n");
-                goto cleanuptorrents;
+                goto torrentparseerror;
             }
         }
 
@@ -122,12 +122,12 @@ static int parse_torrents(telescope_global_t *glob,
             if (current->monitorid == 0) {
                 fprintf(stderr,
                     "0 is not a valid monitor ID -- choose another number.\n");
-                goto cleanuptorrents;
+                goto torrentparseerror;
             }
         } else if (non_filter_entires == 0 && current->filterfile == NULL) {
             /* Alternatively just delete this entry? */
             fprintf(stderr, "Found empty torrent entry. Please fix this.\n");
-            goto cleanuptorrents;
+            goto torrentparseerror;
         } else {
             /* Entry only has a filter. */
             onlyfiltercount += 1;             
@@ -142,7 +142,7 @@ static int parse_torrents(telescope_global_t *glob,
     if (defaultcount == 0) {
         fprintf(stderr, "Please specify one default sink, i.e., an entry "
             "without a filterfile.\n");
-        goto cleanuptorrents;
+        goto torrentparseerror;
     }
 
     /* Found more than one entry with only a filterfile. */
@@ -154,7 +154,7 @@ static int parse_torrents(telescope_global_t *glob,
     glob->torrentcount = torrentcount;
     return torrentcount;
 
-cleanuptorrents:
+torrentparseerror:
     current = glob->torrents;
     while (current != NULL) {
         glob->torrents = current->next;
