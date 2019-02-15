@@ -102,13 +102,12 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
 void halt_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state);
 int create_multiplex_beaconer(beaconthread_t *bthread);
 int run_dag_streams(int dagfd, uint16_t firstport,
-        ndag_beacon_params_t *bparams,
+        int beaconcnt, ndag_beacon_params_t *bparams,
         streamparams_t *sparams,
         void *initdata,
         void *(*initfunc)(void *),
         void *(*processfunc)(void *),
         void (*destroyfunc)(void *));
-
 
 #endif
 

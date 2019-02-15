@@ -233,9 +233,9 @@ int main(int argc, char **argv) {
 
     streamparams_t params;
     int dagfd, errorstate;
-    // int i, ret, maxstreams;
-    // dagstreamthread_t *dagthreads = NULL;
-    ndag_beacon_params_t beaconparams;
+    int beaconcnt = 0;
+    int i = 0;
+    ndag_beacon_params_t* beaconparams;
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
@@ -320,6 +320,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
         goto finalcleanup;
     }
+    // TODO: needs to be an array of things, not just one.
     params.monitorid = torr->monitorid;
     params.dagdevname = glob->dagdev;
     params.dagfd = dagfd;
@@ -335,11 +336,32 @@ int main(int argc, char **argv) {
             (starttime.tv_usec / 1000.0);
     firstport = 10000 + (rand() % 50000);
 
-    beaconparams.srcaddr = torr->srcaddr;
-    beaconparams.groupaddr = torr->mcastaddr;
-    beaconparams.beaconport = torr->mcastport;
-    beaconparams.frequency = DAG_MULTIPLEX_BEACON_FREQ;
-    beaconparams.monitorid = torr->monitorid;
+    /* We have to count since not all torrents require a beacon. */
+    for (torrent_t* itr = glob->torrents; itr != NULL; itr = itr->next) {
+        if (itr->mcastaddr != NULL) {
+            ++beaconcnt;
+        }
+    }
+    
+    /* Allocate parameter array for beacons. */
+    beaconparams = 
+        (ndag_beacon_params_t *) malloc(sizeof(ndag_beacon_params_t) * beaconcnt);
+    if (beaconparams == NULL) {
+        fprintf(stderr, "Failed to allocate memory for beacon parameters\n");
+        goto finalcleanup;
+    }
+
+    /* Copy parameters from config. */
+    for (torrent_t* itr = glob->torrents; itr != NULL; itr = itr->next) {
+        if (itr->mcastaddr != NULL) {
+            beaconparams[i].srcaddr = itr->srcaddr;
+            beaconparams[i].groupaddr = itr->mcastaddr;
+            beaconparams[i].beaconport = itr->mcastport;
+            beaconparams[i].frequency = DAG_MULTIPLEX_BEACON_FREQ;
+            beaconparams[i].monitorid = itr->monitorid;
+            ++i;
+        }
+    }
 
     if (torr->filterfile) {
         /* boot up the things needed for managing the darkfilter */
@@ -352,12 +374,12 @@ int main(int argc, char **argv) {
 
     while (!is_halted()) {
         if (darkfilter) {
-            errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
-                    &params, darkfilter, create_darkfilter, per_dagstream,
-                    destroy_darkfilter);
+            errorstate = run_dag_streams(dagfd, firstport, beaconcnt,
+                    beaconparams, &params, darkfilter, create_darkfilter,
+                    per_dagstream, destroy_darkfilter);
         } else {
-            errorstate = run_dag_streams(dagfd, firstport, &beaconparams,
-                    &params, NULL, NULL, per_dagstream, NULL);
+            errorstate = run_dag_streams(dagfd, firstport, beaconcnt,
+                    beaconparams, &params, NULL, NULL, per_dagstream, NULL);
         }
 
         if (errorstate != 0) {
@@ -379,9 +401,14 @@ finalcleanup:
         pthread_join(darkfilter_tid, NULL);
         destroy_darkfilter_filter(darkfilter);
     }
-    telescope_cleanup_global(glob);
+    if (glob) {
+        telescope_cleanup_global(glob);
+    }
     if (configfile) {
         free(configfile);
+    }
+    if (beaconparams) {
+        free(beaconparams);
     }
 }
 

@@ -419,7 +419,7 @@ static void dst_destroy(dagstreamthread_t *dst,
 }
 
 int run_dag_streams(int dagfd, uint16_t firstport,
-        ndag_beacon_params_t *bparams,
+        int beaconcnt, ndag_beacon_params_t *bparams,
         streamparams_t *sparams,
         void *initdata,
         void *(*initfunc)(void *),
@@ -429,9 +429,11 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     dagstreamthread_t *dagthreads = NULL;
     int maxstreams = 0, errorstate = 0;
     sigset_t sig_before, sig_block_all;
-    int ret, i;
+    int ret, i, j;
     int threadcount = 0;
-    beaconthread_t *beaconer = NULL;
+    int filter_offset = 0;
+    // TODO: Or should this be a pointer to an array?
+    beaconthread_t *beacons = NULL;
     uint8_t *cpumap = NULL;
 
     cpumap = (uint8_t *)malloc(sizeof(uint8_t) * get_nb_cores());
@@ -447,8 +449,23 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         goto halteverything;
     }
 
+    // TODO: Base first port on number of threads for filters / beacons.
+    filter_offset = maxstreams * 4;
+
+    beacons = (beaconthread_t *)(malloc(sizeof(beaconthread_t) * beaconcnt));
+    if (beacons == NULL) {
+        fprintf(stderr, "Failed to alloce memory for beacon threads\n");
+        errorstate = 1;
+        goto halteverything;
+    }
+
     dagthreads = (dagstreamthread_t *)(
             malloc(sizeof(dagstreamthread_t) * maxstreams));
+    if (dagthreads == NULL) {
+        fprintf(stderr, "Failed to alloce memory for dag threads\n");
+        errorstate = 1;
+        goto halteverything;
+    }
 
     sigemptyset(&sig_block_all);
     if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
@@ -509,22 +526,27 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         goto halteverything;
     }
 
-    beaconer = (beaconthread_t *)malloc(sizeof(beaconthread_t));
-    beaconer->params = bparams;
-    beaconer->params->numstreams = threadcount;
-    beaconer->params->streamports = (uint16_t *)malloc(sizeof(uint16_t) * threadcount);
+    /* Start one thread per filter destination. */
+    for (i = 0; i < beaconcnt; ++i) {
+        /* Pass non-owning pointer beacon. Will be cleaned up in telescope. */
+        beacons[i].params = &bparams[i];
+        beacons[i].params->numstreams = threadcount;
+        beacons[i].params->streamports = 
+            (uint16_t *)malloc(sizeof(uint16_t) * threadcount);
 
-    for (i = 0; i < threadcount; i++) {
-        beaconer->params->streamports[i] =
-            firstport + (DAG_MULTIPLEX_PORT_INCR * i);
-    }
+        // TODO: This is not right anymore?
+        for (j = 0; j < threadcount; j++) {
+            beacons[i].params->streamports[j] =
+                filter_offset * i  + firstport + (DAG_MULTIPLEX_PORT_INCR * j);
+        }
 
-    /* Create beaconing thread */
-    ret = create_multiplex_beaconer(beaconer);
-    if (ret < 0) {
-        fprintf(stderr, "Failed to create beaconing thread. Exiting.\n");
-        errorstate = 1;
-        goto halteverything;
+        /* Create beaconing thread */
+        ret = create_multiplex_beaconer(&beacons[i]);
+        if (ret < 0) {
+            fprintf(stderr, "Failed to create beaconing thread. Exiting.\n");
+            errorstate = 1;
+            goto halteverything;
+        }
     }
 
     /* Join on all threads */
@@ -532,7 +554,9 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         pthread_join(dagthreads[i].tid, NULL);
     }
     ndag_interrupt_beacon();
-    pthread_join(beaconer->tid, NULL);
+    for (i = 0; i < beaconcnt; ++i) {
+        pthread_join(beacons[i].tid, NULL);
+    }
 
 halteverything:
     if (dagthreads) {
@@ -548,10 +572,14 @@ halteverything:
         }
         free(dagthreads);
     }
-
-    if (beaconer) {
-        free(beaconer->params->streamports);
-        free(beaconer);
+    
+    for (i = 0; i < beaconcnt; ++i) {
+        if (beacons[i].params->streamports) {
+            free(beacons[i].params->streamports);
+        }
+    }
+    if (beacons) {
+        free(beacons);
     }
     fprintf(stderr, "All DAG streams have been halted.\n");
 
