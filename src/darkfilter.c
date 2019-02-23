@@ -233,11 +233,6 @@ int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
 }
 
 int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
-    /* Return 1 if packet should NOT be discarded, i.e. it doesn't match
-     * any of our exclusion /24s */
-
-    /* Return 0 to exclude the packet. */
-
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
 
@@ -250,22 +245,25 @@ int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
         return -1;
     }
 
-    /* check for ipv4 */
+    /* Check for IPv4. */
     if((ip_hdr = trace_get_ip(state->packet)) == NULL) {
-        /* not an ip packet */
         goto skip;
     }
+
+    /* Extract destination address. */
     ip_addr = htonl(ip_hdr->ip_dst.s_addr);
 
-    if(((ip_addr & 0xFF000000) != state->filter->darknet) ||
-       (CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
+    /* Check if prefix matches the darknet. */
+    if((ip_addr & 0xFF000000) != state->filter->darknet) {
         goto skip;
     }
 
-    return 1;
+    /* Return matching color(s). */
+    return (int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8];
 
 skip:
-    return 0;
+    /* Color 0x1 will drop the packet, see telescope.h. */
+    return 0x1;
 }
 
 void *create_darkfilter(void *params) {
