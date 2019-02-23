@@ -8,10 +8,17 @@ static int parse_torrents(telescope_global_t *glob,
         yaml_document_t *doc, yaml_node_t *torrentlist) {
 
     yaml_node_item_t *item;
+    int needsdefaults;
     int torrentcount = 0;
-    int onlyfiltercount = 0;
-    int defaultcount = 0;
+    int nostreamcount = 0;
+    int nofiltercount = 0;
     torrent_t *current = NULL;
+    torrent_t *new = NULL;
+
+    /* Assign colors incrementally, starting at 0x1 << 1. We could keep a list
+     * of colors in use to check if we have multiple filters that send to the
+     * same multicast group. Seems a bit overkill though. */
+    int nextcolorshift = 1;
 
     if (glob->torrents != NULL) {
         fprintf(stderr, "Config not empty.");
@@ -23,8 +30,9 @@ static int parse_torrents(telescope_global_t *glob,
                 ++item) {
         yaml_node_t *node;
         yaml_node_pair_t *pair;
-        int non_filter_entires = 0;
+        needsdefaults = 0;
 
+        /* Get next torrent entry. */
         node = yaml_document_get_node(doc, *item);
         if (node == NULL) {
             fprintf(stderr, "YAML parsing error.\n");
@@ -32,26 +40,30 @@ static int parse_torrents(telescope_global_t *glob,
         }
 
         /* Create a new entry for this sequence item. */
-        current = (torrent_t *)malloc(sizeof(torrent_t));
-        if (current == NULL) {
+        new = (torrent_t *)malloc(sizeof(torrent_t));
+        if (new == NULL) {
             fprintf(stderr, "Failed to allocate memory for torrent config.\n");
             torrentcount = 0;
             goto torrentparseerror;
         }
 
         /* Initialize everything. */
-        current->mcastaddr = NULL;
-        current->srcaddr = NULL;
-        current->filterfile = NULL;
-        current->mcastport = 0;
-        current->mtu = 0;
-        current->monitorid = 0;
-        current->next = NULL;
+        new->color = 0;
+        new->mcastaddr = NULL;
+        new->srcaddr = NULL;
+        new->filterfile = NULL;
+        new->mcastport = 0;
+        new->mtu = 0;
+        new->monitorid = 0;
+        new->next = NULL;
 
         /* Make sure save the list in the global state. */
         if (glob->torrents == NULL) {
-            glob->torrents = current;
+            glob->torrents = new;
+        } else {
+            current->next = new;
         }
+        current = new;
 
         /* Parse entries for this item. */
         for (pair = node->data.mapping.pairs.start;
@@ -64,32 +76,35 @@ static int parse_torrents(telescope_global_t *glob,
 
             if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                     && !strcmp((char *)key->data.scalar.value, "monitorid")) {
-                current->monitorid = (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
-                ++non_filter_entires;
+                current->monitorid =
+                    (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
+                needsdefaults = 1;
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "mcastport")) {
-                current->mcastport = (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
-                ++non_filter_entires;
+                current->mcastport =
+                    (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
+                needsdefaults = 1;
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "mcastaddr")) {
                 current->mcastaddr = strdup((char *)value->data.scalar.value);
-                ++non_filter_entires;
+                needsdefaults = 1;
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "srcaddr")) {
                 current->srcaddr = strdup((char *)value->data.scalar.value);
-                ++non_filter_entires;
+                needsdefaults = 1;
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "mtu")) {
-                current->mtu = (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
-                ++non_filter_entires;
+                current->mtu =
+                    (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
+                needsdefaults = 1;
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -98,17 +113,8 @@ static int parse_torrents(telescope_global_t *glob,
             }
         }
 
-        if (current->filterfile == NULL) {
-            ++defaultcount;
-            if (defaultcount > 1) {
-                fprintf(stderr, "Cannot have more than one default multicast "
-                        "group.\n");
-                goto torrentparseerror;
-            }
-        }
-
-        /* TODO: Not sure we want to set defaults. */
-        if (non_filter_entires > 0) {
+        /* Set defaults if any entry besides the filterfile is set. */
+        if (needsdefaults) {
             if (current->mcastaddr == NULL) {
                 current->mcastaddr = strdup("225.0.0.225");
             }
@@ -124,32 +130,46 @@ static int parse_torrents(telescope_global_t *glob,
                     "0 is not a valid monitor ID -- choose another number.\n");
                 goto torrentparseerror;
             }
-        } else if (non_filter_entires == 0 && current->filterfile == NULL) {
-            /* Alternatively just delete this entry? */
-            fprintf(stderr, "Found empty torrent entry. Please fix this.\n");
-            goto torrentparseerror;
-        } else {
-            /* Entry only has a filter. */
-            onlyfiltercount += 1;             
         }
 
-        /* Next torrent. */
-        current = current->next;
+        /* Assign color to filter, see telescope.h for rules. */
+        if (current->filterfile != NULL && current->mcastaddr !=  NULL) {
+            if (nextcolorshift >= 8) {
+                fprintf(stderr,
+                    "Too many streams. Cannot handle more than eight multicast "
+                    "groups.\n");
+                goto torrentparseerror;
+            }
+            current->color = 0x1 << nextcolorshift;
+            ++nextcolorshift;
+        } else if (current->filterfile != NULL && current->mcastaddr == NULL) {
+            current->color = 0x1;
+            ++nostreamcount;
+        } else if (current->filterfile == NULL && current->mcastaddr != NULL) {
+            current->color = 0x0;
+            ++nofiltercount;
+        } else {
+            /* Both NULL. */
+            fprintf(stderr,
+                "Found empty entry. Specify either a filterfile or mcastaddr.\n");
+            goto torrentparseerror;
+        }
+
+        /* Got one. */
         ++torrentcount;
     }
 
-    /* There should only be one torrent that drops everything. */
-    if (defaultcount == 0) {
-        fprintf(stderr, "Please specify one default sink, i.e., an entry "
-            "without a filterfile.\n");
+    /* There should be exactly one default sink. */
+    if (nofiltercount != 1) {
+        fprintf(stderr, "Please specify exactly one default sink, i.e., "
+            "an entry without a filterfile.\n");
         goto torrentparseerror;
     }
 
     /* Found more than one entry with only a filterfile. */
-    if (onlyfiltercount > 1) {
-        fprintf(stderr, "Warning: More than one entry drops everything.\n");
+    if (nostreamcount > 1) {
+        fprintf(stderr, "Warning: More than one filter drops packets.\n");
     }
-
 
     glob->torrentcount = torrentcount;
     return torrentcount;
@@ -277,7 +297,7 @@ telescope_global_t *telescope_init_global(char *configfile) {
         fprintf(stderr, "Failed to allocate memory for global variables\n");
         return NULL;
     }
-    
+
     /* Initialization. */
     glob->dagdev = NULL;
     glob->statdir = NULL;
@@ -288,7 +308,7 @@ telescope_global_t *telescope_init_global(char *configfile) {
 
     /* Parse config file. */
     if (parse_yaml(glob, configfile, parse_option) == -1) {
-        telescope_cleanup_global(glob);    
+        telescope_cleanup_global(glob);
         return NULL;
     }
 
@@ -302,6 +322,10 @@ telescope_global_t *telescope_init_global(char *configfile) {
 }
 
 void telescope_cleanup_torrent(torrent_t *torr) {
+    if (torr == NULL) {
+        return;
+    }
+
     if (torr->mcastaddr) {
         free(torr->mcastaddr);
     }
@@ -313,6 +337,8 @@ void telescope_cleanup_torrent(torrent_t *torr) {
     if (torr->filterfile) {
         free(torr->filterfile);
     }
+
+    free(torr);
 }
 
 void telescope_cleanup_global(telescope_global_t *glob) {
@@ -331,7 +357,7 @@ void telescope_cleanup_global(telescope_global_t *glob) {
 
     if (glob->dagdev) {
         free(glob->dagdev);
-    } 
+    }
 
     if (glob->statdir) {
         free(glob->statdir);

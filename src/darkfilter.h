@@ -5,9 +5,14 @@
 #include <libtrace.h>
 #include <wandio.h>
 
-typedef struct filter {
+typedef struct darkfilter_file {
+  uint8_t color;
+  char *excl_file;
+} darkfilter_file_t;
 
-    char *excl_file;
+typedef struct filter {
+    int filecnt;
+    darkfilter_file_t *files;
 
     uint32_t darknet;
 
@@ -22,7 +27,8 @@ typedef struct darkfilter {
     libtrace_packet_t *packet;
 } darkfilter_t;
 
-darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file);
+darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
+        darkfilter_file_t* files);
 void destroy_darkfilter_filter(darkfilter_filter_t *filter);
 int update_darkfilter_exclusions(darkfilter_filter_t *filter);
 

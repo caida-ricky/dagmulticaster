@@ -208,9 +208,9 @@ static void *darkfilter_reloader(void *threaddata) {
     pthread_exit(NULL);
 }
 
-static darkfilter_filter_t *init_darkfilter(int first_octet, char *excl_file) {
+static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt, darkfilter_file_t *files) {
     darkfilter_filter_t *darkfilter =
-        create_darkfilter_filter(first_octet, excl_file);
+        create_darkfilter_filter(first_octet, cnt, files);
 
     /* create thread to watch for reload events and trigger exclusion updates */
     if (pthread_create(&darkfilter_tid, NULL, darkfilter_reloader,
@@ -234,13 +234,16 @@ int main(int argc, char **argv) {
     streamparams_t params;
     int dagfd, errorstate;
     int beaconcnt = 0;
-    int i = 0;
-    ndag_beacon_params_t* beaconparams;
+    int beaconindex = 0;
+    int filecnt = 0;
+    int fileindex = 0;
+    ndag_beacon_params_t *beaconparams = NULL;
+    darkfilter_file_t *darkfilterfiles = NULL;
+    darkfilter_filter_t *darkfilter = NULL;
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
     struct sigaction sigact;
-    darkfilter_filter_t *darkfilter = NULL;
 
     srand((unsigned) time(&t));
 
@@ -297,6 +300,7 @@ int main(int argc, char **argv) {
         goto finalcleanup;
     }
 
+    /* TODO: Remove this in the future. */
     torrent_t *torr = glob->torrents;
 
     /* Set signal callbacks */
@@ -320,6 +324,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to open DAG device: %s\n", strerror(errno));
         goto finalcleanup;
     }
+
     // TODO: needs to be an array of things, not just one.
     params.monitorid = torr->monitorid;
     params.dagdevname = glob->dagdev;
@@ -341,35 +346,52 @@ int main(int argc, char **argv) {
         if (itr->mcastaddr != NULL) {
             ++beaconcnt;
         }
+        if (itr->filterfile != NULL) {
+            ++filecnt;
+        }
     }
-    
+
     /* Allocate parameter array for beacons. */
-    beaconparams = 
+    beaconparams =
         (ndag_beacon_params_t *) malloc(sizeof(ndag_beacon_params_t) * beaconcnt);
     if (beaconparams == NULL) {
-        fprintf(stderr, "Failed to allocate memory for beacon parameters\n");
+        fprintf(stderr, "Failed to allocate memory for beacon parameters.\n");
+        goto finalcleanup;
+    }
+
+    /* Allocate filter file array. */
+    darkfilterfiles =
+        (darkfilter_file_t *) malloc(sizeof(darkfilter_file_t) * filecnt);
+    if (darkfilterfiles == NULL) {
+        fprintf(stderr, "Failed to allocate memory for darkfilter files.\n");
         goto finalcleanup;
     }
 
     /* Copy parameters from config. */
+    beaconindex = 0;
+    fileindex = 0;
     for (torrent_t* itr = glob->torrents; itr != NULL; itr = itr->next) {
         if (itr->mcastaddr != NULL) {
-            beaconparams[i].srcaddr = itr->srcaddr;
-            beaconparams[i].groupaddr = itr->mcastaddr;
-            beaconparams[i].beaconport = itr->mcastport;
-            beaconparams[i].frequency = DAG_MULTIPLEX_BEACON_FREQ;
-            beaconparams[i].monitorid = itr->monitorid;
-            ++i;
+            beaconparams[beaconindex].srcaddr = itr->srcaddr;
+            beaconparams[beaconindex].groupaddr = itr->mcastaddr;
+            beaconparams[beaconindex].beaconport = itr->mcastport;
+            beaconparams[beaconindex].frequency = DAG_MULTIPLEX_BEACON_FREQ;
+            beaconparams[beaconindex].monitorid = itr->monitorid;
+            beaconindex += 1;
+        }
+        if (itr->filterfile != NULL) {
+            darkfilterfiles[fileindex].color = itr->color;
+            darkfilterfiles[fileindex].excl_file = itr->filterfile;
+            itr->filterfile = NULL; // I don't think we need this anymore.
+            fileindex += 1;
         }
     }
 
-    if (torr->filterfile) {
-        /* boot up the things needed for managing the darkfilter */
-        darkfilter = init_darkfilter(glob->darknetoctet, torr->filterfile);
-        if (!darkfilter) {
-            fprintf(stderr, "Failed to create darkfilter filter.\n");
-            goto finalcleanup;
-        }
+    /* boot up the things needed for managing the darkfilter */
+    darkfilter = init_darkfilter(glob->darknetoctet, filecnt, darkfilterfiles);
+    if (!darkfilter) {
+        fprintf(stderr, "Failed to create darkfilter filter.\n");
+        goto finalcleanup;
     }
 
     while (!is_halted()) {
@@ -400,6 +422,14 @@ finalcleanup:
     if (darkfilter) {
         pthread_join(darkfilter_tid, NULL);
         destroy_darkfilter_filter(darkfilter);
+    }
+    if (darkfilterfiles) {
+        for (fileindex = 0; fileindex < filecnt; ++fileindex) {
+            if (darkfilterfiles[fileindex].excl_file) {
+                free(darkfilterfiles[fileindex].excl_file);
+            }
+        }
+        free(darkfilterfiles);
     }
     if (glob) {
         telescope_cleanup_global(glob);

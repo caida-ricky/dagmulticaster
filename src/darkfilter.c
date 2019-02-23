@@ -26,8 +26,7 @@
 #define CURRENT_EXCLUDE(filter) ((filter)->exclude[(filter)->current_exclude])
 
 /* TODO port to libwandio?? */
-static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
-{
+static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp) {
     char cbuf;
     int rval;
     int i;
@@ -71,7 +70,7 @@ static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
     return i;
 }
 
-static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
+static int parse_excl_file(uint8_t *exclude, const darkfilter_file_t *filter_file) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -91,13 +90,13 @@ static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
     int overlaps = 0;
     int idx;
 
-    if ((file = wandio_create(excl_file)) == NULL) {
-        fprintf(stderr, "Failed to open exclusion file %s\n", excl_file);
+    if ((file = wandio_create(filter_file->excl_file)) == NULL) {
+        fprintf(stderr, "Failed to open exclusion file %s\n", filter_file->excl_file);
         return -1;
     }
 
     while (wandio_fgets(file, buf, 1024, 1) != 0) {
-        // split the line to get ip and len
+        /* Split the line to get ip and len. */
         if ((mask_str = strchr(buf, '/')) == NULL) {
             fprintf(stderr, "ERROR: Malformed prefix for darkfilter: %s\n",
                     buf);
@@ -106,7 +105,7 @@ static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
         *mask_str = '\0';
         mask_str++;
 
-        // convert the ip and mask to a number
+        /* Convert the ip and mask to a number. */
         addr = inet_addr(buf);
         addr = ntohl(addr);
         mask = atoi(mask_str);
@@ -120,27 +119,39 @@ static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
                   buf, mask_str);
           continue;
         }
-        // compute the /24s that this prefix covers
-        // perhaps not the most efficient way to do this, but i've borrowed it
-        // from other code that I'm sure actually works, and this only happens
-        // once at startup, so whatevs ;)
+
+        /* Compute the /24s that this prefix covers.
+         * Perhaps not the most efficient way to do this, but i've borrowed it
+         * from other code that I'm sure actually works, and this only happens
+         * once at startup, so whatevs. ;) */
         first_addr = addr & (~0 << (32-mask));
-        last_addr = first_addr + (1<<(32-mask))-1;
+        last_addr = first_addr + (1 << (32-mask)) - 1;
 
         first_slash24 = (first_addr/256)*256;
         last_slash24 = (last_addr/256)*256;
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
-            idx = (x&0x00FFFF00)>>8;
-            if (exclude[idx] == 0) {
-                exclude[idx] = 1;
-                cnt++;
+            idx = (x & 0x00FFFF00) >> 8;
+            if ((exclude[idx] == 1 && filter_file->color != 1) ||
+                    (exclude[idx] > 1 && filter_file->color == 1)) {
+                /* An entry already registered to be dropped is assigned another
+                 * color or an already colored entry is assigned to be drop.*/
+                fprintf(stderr, "[darkfilter] Cannot send packet marked as "
+                    "dropped to another sink.\n");
+                goto err;
             } else {
-                overlaps++;
+                /* Or do we only want to count filters that apply the same color? */
+                if (exclude[idx] != 0) {
+                    ++overlaps;
+                } else {
+                    ++cnt;
+                }
+                exclude[idx] |= filter_file->color;
             }
         }
     }
 
+    fprintf(stderr, "[darkfilter] INFO: Filter %s\n", filter_file->excl_file);
     fprintf(stderr, "[darkfilter] INFO: Excluding %d /24s\n", cnt);
     fprintf(stderr, "[darkfilter] INFO: Overlaps %d /24s\n", overlaps);
 
@@ -153,7 +164,8 @@ err:
     return -1;
 }
 
-darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) {
+darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
+                                              darkfilter_file_t* files) {
     darkfilter_filter_t *filter;
     int i;
 
@@ -170,7 +182,8 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) 
         goto err;
     }
 
-    filter->excl_file = excl_file;
+    filter->filecnt = cnt;
+    filter->files = files;
     filter->darknet = first_octet << 24;
 
     for (i=0; i<2; i++) {
@@ -181,8 +194,10 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) 
     }
     filter->current_exclude = 0;
 
-    if (parse_excl_file(CURRENT_EXCLUDE(filter), filter->excl_file) != 0) {
-      goto err;
+    for (i = 0; i < cnt; ++i) {
+        if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
+          goto err;
+        }
     }
 
     return filter;
@@ -205,10 +220,13 @@ void destroy_darkfilter_filter(darkfilter_filter_t *filter) {
 }
 
 int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
+    int i;
     uint8_t *excl = filter->exclude[!filter->current_exclude];
     memset(excl, 0, EXCLUDE_LEN);
-    if (parse_excl_file(excl, filter->excl_file) != 0) {
-        return -1;
+    for (i = 0; i < filter->filecnt; ++i) {
+        if (parse_excl_file(excl, &filter->files[i]) != 0) {
+            return -1;
+        }
     }
     filter->current_exclude = !filter->current_exclude;
     return 0;
@@ -223,7 +241,7 @@ int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
 
-    /* prepare a libtrace packet */
+    /* Prepare a libtrace packet. */
     if (trace_prepare_packet(state->dummytrace, state->packet, pktbuf,
                              TRACE_RT_DATA_ERF,
                              TRACE_PREP_DO_NOT_OWN_BUFFER) == -1) {

@@ -5,6 +5,24 @@
 #include <stdint.h>
 
 typedef struct torrent {
+    /*
+     * The color is a bitmask. This allows filters to overlap. Since the default
+     * should be forwarding to the catch all multicast group we should optimze
+     * for that specific case. In general we have to factors that decide where
+     * to forward packets, the filterfile and mcastaddr.
+     *
+     *  filterfile | mcastaddr | action
+     * ------------+-----------+-------
+     *  set        | set       | send matchting packets to the group
+     *  set        | NULL      | drop these packets
+     *  NULL       | set       | default route (should be unique)
+     *  NULL       | NULL      | error: print msg and exit
+     *
+     * Reserved bitmasks
+     *  0x0 --> default route
+     *  0x1 --> drop packets
+     */
+    uint8_t color;
     char *mcastaddr;
     char *srcaddr;
     char *filterfile;
