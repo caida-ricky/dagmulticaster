@@ -70,7 +70,7 @@ static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp) {
     return i;
 }
 
-static int parse_excl_file(uint8_t *exclude, const darkfilter_file_t *filter_file) {
+static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -132,20 +132,24 @@ static int parse_excl_file(uint8_t *exclude, const darkfilter_file_t *filter_fil
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
             idx = (x & 0x00FFFF00) >> 8;
-            if ((exclude[idx] == 1 && filter_file->color != 1) ||
-                    (exclude[idx] > 1 && filter_file->color == 1)) {
+            if ((exclude[idx] == 0 && filter_file->color != 1) ||
+                    (exclude[idx] > 1 && filter_file->color == 0)) {
                 /* An entry already registered to be dropped is assigned another
                  * color or an already colored entry is assigned to be drop.*/
                 fprintf(stderr, "[darkfilter] Cannot send packet marked as "
                     "dropped to another sink.\n");
                 goto err;
+            } else if (exclude[idx] == 1) {
+                /* Replace default route. */
+                exclude[idx] = filter_file->color;
             } else {
                 /* Or do we only want to count filters that apply the same color? */
-                if (exclude[idx] != 0) {
+                if (exclude[idx] > 1) {
                     ++overlaps;
                 } else {
                     ++cnt;
                 }
+                /* Stack potential colors. */
                 exclude[idx] |= filter_file->color;
             }
         }
@@ -167,7 +171,7 @@ err:
 darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
                                               darkfilter_file_t* files) {
     darkfilter_filter_t *filter;
-    int i;
+    int i, j;
 
     filter = malloc(sizeof(darkfilter_filter_t));
     if (!filter) {
@@ -188,8 +192,12 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
 
     for (i=0; i<2; i++) {
         if ((filter->exclude[i] =
-             calloc(EXCLUDE_LEN, sizeof(uint8_t))) == NULL) {
+             calloc(EXCLUDE_LEN, sizeof(color_t))) == NULL) {
             goto err;
+        }
+        /* Initialize to default rout 1.  */
+        for (j = 0; j < EXCLUDE_LEN; ++j) {
+            filter->exclude[i][j] = 1;
         }
     }
     filter->current_exclude = 0;
@@ -221,8 +229,11 @@ void destroy_darkfilter_filter(darkfilter_filter_t *filter) {
 
 int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
     int i;
-    uint8_t *excl = filter->exclude[!filter->current_exclude];
-    memset(excl, 0, EXCLUDE_LEN);
+    color_t *excl = filter->exclude[!filter->current_exclude];
+    /* 1 signifies forwarding to the default route.  */
+    for (i = 0; i < EXCLUDE_LEN; ++i) {
+        excl[i] = 1;
+    }
     for (i = 0; i < filter->filecnt; ++i) {
         if (parse_excl_file(excl, &filter->files[i]) != 0) {
             return -1;
@@ -262,8 +273,8 @@ int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
     return (int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8];
 
 skip:
-    /* Color 0x1 will drop the packet, see telescope.h. */
-    return 0x1;
+    /* Color 0 will drop the packet, see telescope.h. */
+    return 0;
 }
 
 void *create_darkfilter(void *params) {

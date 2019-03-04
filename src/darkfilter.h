@@ -5,8 +5,10 @@
 #include <libtrace.h>
 #include <wandio.h>
 
+#include "dagmultiplexer.h"
+
 typedef struct darkfilter_file {
-  uint8_t color;
+  color_t color;
   char *excl_file;
 } darkfilter_file_t;
 
@@ -16,7 +18,7 @@ typedef struct filter {
 
     uint32_t darknet;
 
-    uint8_t *exclude[2];
+    color_t *exclude[2];
     volatile sig_atomic_t current_exclude;
 
 } darkfilter_filter_t;

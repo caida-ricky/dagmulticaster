@@ -23,27 +23,94 @@
 #include "byteswap.h"
 #include "darkfilter.h"
 
+/* Check if bit at position `needle` is set in `haystack`. */
+#define IS_SET(haystack, needle) (((haystack >> needle) & 0x1) != 0)
+
+/* Hide the needle at bit `pos` in `haystack`. */
+#define SET_IT(haystack, position) (haystack |= (0x1 << position))
+
 static volatile sig_atomic_t reload = 0;
 static pthread_t darkfilter_tid;
+
+static int leading_zeros(uint8_t color) {
+    /* We use this to map colors to an array position. Having no bit set counts
+     * as all bits as zeros, for out 8 bit value that's positon 8. */
+    if (color == 0) {
+        return sizeof(color) * 8;
+    }
+
+    /* Count by hand. There may be compiler intrinsics for this, but I'm not
+     * sure how they compare speed-wise and at what point they pay off. */
+    int cnt = 0;
+    while (color >> cnt != 0) {
+        ++cnt;
+    }
+    return cnt;
+}
 
 static void reload_signal(int signal) {
     (void) signal;
     reload = 1;
 }
 
+/* Add the packet to the state with color. Note down collected bytes. */
+static void append(dagstreamthread_t *dst, uint16_t curiov, int color,
+        char *bottom, uint16_t len, uint32_t *collected) {
+    if (dst->iovs[color][curiov].iov_base == NULL) {
+        dst->iovs[color][curiov].iov_base = bottom;
+    }
+    dst->iovs[color][curiov].iov_len += len;
+    collected[color] += len;
+}
+
+/* End an iov and allocate a new one if necessary. */
+static void end(dagstreamthread_t *dst, uint16_t *curiov, int color) {
+    if (dst->iovs[color][*curiov].iov_len != 0) {
+        *curiov = *curiov + 1;
+        /* Allocate more iovs if we don't have enough. */
+        if (*curiov == dst->iov_alloc[color]) {
+            dst->iovs[color] = (struct iovec *) realloc(dst->iovs[color],
+                    sizeof(struct iovec) * (dst->iov_alloc[color] + 10));
+            dst->iov_alloc[color] += 10;
+        }
+        dst->iovs[color][*curiov].iov_base = NULL;
+        dst->iovs[color][*curiov].iov_len = 0;
+    }
+}
+
 static char * walk_stream_buffer(char *bottom, char *top,
         uint16_t *reccount, uint16_t *curiov, dagstreamthread_t *dst,
-        darkfilter_t *filter) {
-
+        darkfilter_t *filter, uint16_t* dirty) {
+    uint32_t collected[DAG_COLOR_SLOTS];
     uint32_t walked = 0;
     uint32_t wwalked = 0;
     uint32_t tx_wire = 0;
-    uint16_t maxsize = dst->params.mtu - ENCAP_OVERHEAD;
-    int ret;
+    uint16_t maxsize;
+    int i;
+    int color = 0;
+    int non_default_open = 0; // Track if previous packet had a non-default sink.
 
-    *curiov = 0;
-    dst->iovs[*curiov].iov_base = NULL;
-    dst->iovs[*curiov].iov_len = 0;
+    /* Sanity check. */
+    if (dst->params.sinkcnt == 0) {
+        fprintf(stderr, "Need at least one sink to write to.\n");
+    }
+
+    /* Find sink with smallest MTU. */
+    maxsize = dst->params.sinks[0].mtu;
+    for (i = 1; i < dst->params.sinkcnt; ++i) {
+        if (dst->params.sinks[i].mtu < maxsize) {
+            maxsize = dst->params.sinks[i].mtu;
+        }
+    }
+    maxsize -= ENCAP_OVERHEAD;
+
+    /* Nothing collected atm. */
+    memset(collected, 0, sizeof(collected));
+
+    for (i = 0; i < dst->inuse; ++i) {
+        dst->iovs[i][curiov[i]].iov_base = NULL;
+        dst->iovs[i][curiov[i]].iov_len = 0;
+    }
 
     while (bottom < top && walked < maxsize) {
         dag_record_t *erfhdr = (dag_record_t *)bottom;
@@ -61,65 +128,99 @@ static char * walk_stream_buffer(char *bottom, char *top,
         }
 
         if (filter) {
-            ret = apply_darkfilter(filter, bottom);
-            if (ret < 0) {
+            color = apply_darkfilter(filter, bottom);
+            if (color < 0) {
                 fprintf(stderr, "Error applying darknet filter to received traffic.\n");
                 halt_program();
                 return bottom;
             }
 
-            if (ret == 0) {
-                /* skip this packet */
+            /* No color (i.e. 0) drops packets, see telescope.h */
+            if (color == 0) {
+                /* Skip this packet. */
                 bottom += len;
 
-                /* update stats */
+                /* Update stats. */
                 dst->stats.walked_records++;
                 dst->stats.walked_bytes += len;
                 dst->stats.walked_wbytes += wlen;
-                dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
+                //dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
                 dst->stats.tx_wbytes += tx_wire;
 
-                /* end current iovec if it has something in it already */
-                if (dst->iovs[*curiov].iov_len == 0) {
-                    continue;
+                /* Close running iovecs. */
+                for (i = 0; i < dst->inuse; ++i) {
+                    end(dst, &curiov[i], i);
                 }
-                *curiov = *curiov + 1;
-                if (*curiov == dst->iov_alloc) {
-                    dst->iovs = (struct iovec *)realloc(dst->iovs,
-                            sizeof(struct iovec) * (dst->iov_alloc + 10));
-                    dst->iov_alloc += 10;
-                }
-                dst->iovs[*curiov].iov_base = NULL;
-                dst->iovs[*curiov].iov_len = 0;
+
                 tx_wire = 0;
+
+                /* Next packet. */
                 continue;
             }
         }
 
-        if (walked > 0 && walked + len > maxsize) {
-            /* Current record would push us over the end of our datagram */
-            break;
+        /* The default case should be fast. Lot's of indirections here. */
+        if (color == 1) {
+            i = leading_zeros(0); // Should be 0.
+            if (collected[i] > 0 && collected[i] + len > maxsize) {
+                /* Current record would push us over the end of our datagram */
+                break;
+            }
+            append(dst, curiov[i], i, bottom, len, collected);
+            dirty[i] += 1;
+
+            /* Close all running non-default iovecs. Technically,
+             * this means skipping the first entry. */
+            if (non_default_open) {
+                for (i = 1; i < dst->inuse; ++i) {
+                    end(dst, &curiov[i], i);
+                }
+            }
+            non_default_open = 0;
+        } else {
+            /* Sadly we have to figure this out before we do anything else.
+             * Otherwise we risk appending a packet to the same sink twice.*/
+            for (i = 1; i < dst->inuse; ++i) {
+                if (IS_SET(color, i) && collected[i] > 0
+                        && collected[i] + len > maxsize) {
+                    goto stopwalking;
+                }
+            }
+
+            /* Iterate over all colors, need to close default if it was open. */
+            for (i = 0; i < dst->inuse; ++i) {
+                if (IS_SET(color, i)) {
+                    dirty[i] += 1;
+                    append(dst, curiov[i], i, bottom, len, collected);
+                } else {
+                    end(dst, &curiov[i], i);
+                }
+            }
+
+            /* Need to close these if next packet is default only. */
+            non_default_open = 1;
         }
 
-        if (dst->iovs[*curiov].iov_base == NULL) {
-            dst->iovs[*curiov].iov_base = bottom;
-        }
-        dst->iovs[*curiov].iov_len += len;
+        /* Record local stats. */
         tx_wire += wlen;
-
         walked += len;
         wwalked += wlen;
+
+        /* Global stats and progress. */
         bottom += len;
         (*reccount)++;
         dst->stats.walked_records++;
     }
 
+stopwalking:
+    /* Write local stats to global info. */
     dst->stats.walked_bytes += walked;
     dst->stats.walked_wbytes += wwalked;
-    dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
+    // TODO: Should this be an array or sink-specific stat?
+    //dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
     dst->stats.tx_wbytes += tx_wire;
 
-    /* walked can be larger than maxsize if the first record is
+    /* Walked can be larger than maxsize if the first record is
      * very large. This is intentional; the multicaster will truncate the
      * packet record if it is too big and set the truncation flag.
      */
@@ -128,17 +229,23 @@ static char * walk_stream_buffer(char *bottom, char *top,
     }
 
     return bottom;
-
 }
 
 uint16_t telescope_walk_records(char **bottom, char *top,
         dagstreamthread_t *dst, uint16_t *savedtosend,
         ndag_encap_params_t *state) {
 
-    uint16_t available = 0;
+    uint16_t available[DAG_COLOR_SLOTS];
+    uint16_t dirty[DAG_COLOR_SLOTS];
     uint16_t total_walked = 0;
     uint16_t records_walked = 0;
+    int i, max;
+
+    /* Get our application-specific state. */
     darkfilter_t *filter = (darkfilter_t *)dst->extra;
+
+    /* Initialive available packet count to 0. */
+    memset(available, 0, sizeof(available));
 
     /* Sadly, we have to walk whatever dag_advance_stream gives us because
      *   a) top is not guaranteed to be on a packet boundary.
@@ -148,41 +255,99 @@ uint16_t telescope_walk_records(char **bottom, char *top,
      */
 
     do {
+        /* Dirty flags for each iteration. */
+        memset(dirty, 0, sizeof(available));
+
         records_walked = 0;
         (*bottom) = walk_stream_buffer((*bottom), top,
-                &records_walked, &available, dst, filter);
+                &records_walked, available, dst, filter, dirty);
 
         total_walked += records_walked;
         if (records_walked > 0) {
             dst->idletime = 0;
 
-            if (ndag_push_encap_iovecs(state, dst->iovs, available + 1,
-                        records_walked, *savedtosend) == 0) {
-                halt_program();
-                break;
+            /* Append all new iovecs to ndag stream. */
+            for (i = 0; i < dst->inuse; ++i) {
+                if (dirty[i]) {
+                    if (ndag_push_encap_iovecs(&state[i], dst->iovs[i],
+                                available[i] + 1, records_walked,
+                                    savedtosend[i]) == 0) {
+                        halt_program();
+                        break;
+                    }
+                    savedtosend[i] += 1;
+                }
             }
-            (*savedtosend) = (*savedtosend) + 1;
-
         }
-    } while (!is_halted() && records_walked > 0 &&
-        *savedtosend < NDAG_BATCH_SIZE);
+
+        /* Find largest current batch size. */
+        max = 0;
+        for (i = 0; i < dst->inuse; ++i) {
+            if (savedtosend[i] > max) {
+                max = savedtosend[i];
+            }
+        }
+    } while (!is_halted() && records_walked > 0 && max < NDAG_BATCH_SIZE);
 
     return total_walked;
 }
 
 static void *per_dagstream(void *threaddata) {
-
-    ndag_encap_params_t state;
     dagstreamthread_t *dst = (dagstreamthread_t *)threaddata;
+    ndag_encap_params_t state[DAG_COLOR_SLOTS];
+    int initialized = 0;
+    int i, res, index;
 
-    if (init_dag_stream(dst, &state) == -1) {
-        halt_dag_stream(dst, NULL);
-    } else {
-        dag_stream_loop(dst, &state, telescope_walk_records);
-        ndag_destroy_encap(&state);
-        halt_dag_stream(dst, &state);
+    /* Sanity check. */
+    if (dst->params.sinkcnt == 0 || dst->params.sinks == NULL) {
+        fprintf(stderr, "At least on sink is required to start a dag stream.\n");
+        goto perdagstreamexit;
     }
 
+    for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
+        dst->iovs[i] = NULL;
+    }
+    memset(dst->iov_alloc, 0, sizeof(dst->iov_alloc));
+
+    /* Initialize dagstream thread.*/
+    if (init_dag_stream(dst) == -1) {
+        goto perdagstreamexit;
+    }
+
+    /* Color bit indices should match the iovec position to make lookup easy. */
+    for (initialized = 0; initialized < dst->params.sinkcnt; ++initialized) {
+        /* Use the color bit position as an index for the state. */
+        index = leading_zeros(dst->params.sinks[initialized].color);
+        res = init_dag_sink(&state[index], &dst->params.sinks[initialized],
+            dst->params.streamnum, dst->params.globalstart);
+        if (res == -1) {
+            goto perdagstreamexit;
+        }
+    }
+    dst->inuse = initialized;
+
+    dag_stream_loop(dst, state, telescope_walk_records);
+    for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
+        ndag_destroy_encap(&state[i]);
+    }
+
+perdagstreamexit:
+    /* Stop sinks and clean up their state. */
+    for (i = 0; i < initialized; ++i) {
+        halt_dag_sink(&state[i]);
+    }
+
+    /* Stop reading new data. Shouldn't this happen before we stop the sinks? */
+    halt_dag_stream(dst);
+
+    /* Clean up iovecs and their array. */
+    for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
+        if (dst->iovs[i] != NULL) {
+            free(dst->iovs[i]);
+        }
+    }
+
+    /* Exit. */
     fprintf(stderr, "Exiting thread for stream %d\n", dst->params.streamnum);
     pthread_exit(NULL);
 }
@@ -208,7 +373,8 @@ static void *darkfilter_reloader(void *threaddata) {
     pthread_exit(NULL);
 }
 
-static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt, darkfilter_file_t *files) {
+static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt,
+                                            darkfilter_file_t *files) {
     darkfilter_filter_t *darkfilter =
         create_darkfilter_filter(first_octet, cnt, files);
 
@@ -300,9 +466,6 @@ int main(int argc, char **argv) {
         goto finalcleanup;
     }
 
-    /* TODO: Remove this in the future. */
-    torrent_t *torr = glob->torrents;
-
     /* Set signal callbacks */
     /* Interrupt for halt, hup to signal darkfilter reload */
     sigact.sa_handler = reload_signal;
@@ -326,12 +489,8 @@ int main(int argc, char **argv) {
     }
 
     // TODO: needs to be an array of things, not just one.
-    params.monitorid = torr->monitorid;
     params.dagdevname = glob->dagdev;
     params.dagfd = dagfd;
-    params.multicastgroup = torr->mcastaddr;
-    params.sourceaddr = torr->srcaddr;
-    params.mtu = torr->mtu;
     params.statinterval = glob->statinterval;
     params.statdir = glob->statdir;
 
@@ -367,22 +526,41 @@ int main(int argc, char **argv) {
         goto finalcleanup;
     }
 
-    /* Copy parameters from config. */
+    /* Allocate param array for stream sinks. */
+    params.sinkcnt = beaconcnt;
+    params.sinks = (streamsink_t *) malloc(sizeof(streamsink_t) * beaconcnt);
+    if (params.sinks == NULL) {
+        fprintf(stderr, "Failed to allocate memory for stream sink parameters.\n");
+        goto finalcleanup;
+    }
+
+    /* Copy parameters from config. Ownership retained by config,
+     * which will clean up the strings.*/
     beaconindex = 0;
     fileindex = 0;
     for (torrent_t* itr = glob->torrents; itr != NULL; itr = itr->next) {
         if (itr->mcastaddr != NULL) {
+            /* Data to create beacons for rendezvous. */
             beaconparams[beaconindex].srcaddr = itr->srcaddr;
             beaconparams[beaconindex].groupaddr = itr->mcastaddr;
             beaconparams[beaconindex].beaconport = itr->mcastport;
             beaconparams[beaconindex].frequency = DAG_MULTIPLEX_BEACON_FREQ;
             beaconparams[beaconindex].monitorid = itr->monitorid;
+            /* Streamparameters to sort incoming packets into. */
+            params.sinks[beaconindex].color = itr->color;
+            params.sinks[beaconindex].sourceaddr = itr->srcaddr;
+            params.sinks[beaconindex].multicastgroup = itr->mcastaddr;
+            params.sinks[beaconindex].monitorid = itr->monitorid;
+            params.sinks[beaconindex].mtu = itr->mtu;
+            /* Got one.*/
             beaconindex += 1;
         }
         if (itr->filterfile != NULL) {
+            /* Data to build the filter from exclusion files. */
             darkfilterfiles[fileindex].color = itr->color;
             darkfilterfiles[fileindex].excl_file = itr->filterfile;
-            itr->filterfile = NULL; // I don't think we need this anymore.
+            itr->filterfile = NULL; // Transfer ownership.
+            /* Got one.*/
             fileindex += 1;
         }
     }
@@ -423,6 +601,7 @@ finalcleanup:
         pthread_join(darkfilter_tid, NULL);
         destroy_darkfilter_filter(darkfilter);
     }
+    // TODO: Should this happen in `destroy_darkfilter`?
     if (darkfilterfiles) {
         for (fileindex = 0; fileindex < filecnt; ++fileindex) {
             if (darkfilterfiles[fileindex].excl_file) {
@@ -439,6 +618,9 @@ finalcleanup:
     }
     if (beaconparams) {
         free(beaconparams);
+    }
+    if (params.sinks) {
+        free(params.sinks);
     }
 }
 

@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include "dagmultiplexer.h"
+
 typedef struct torrent {
     /*
      * The color is a bitmask. This allows filters to overlap. Since the default
@@ -19,10 +21,10 @@ typedef struct torrent {
      *  NULL       | NULL      | error: print msg and exit
      *
      * Reserved bitmasks
-     *  0x0 --> default route
-     *  0x1 --> drop packets
+     *  0x0 --> drop packets
+     *  0x1 --> default route
      */
-    uint8_t color;
+    color_t color;
     char *mcastaddr;
     char *srcaddr;
     char *filterfile;

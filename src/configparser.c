@@ -143,10 +143,10 @@ static int parse_torrents(telescope_global_t *glob,
             current->color = 0x1 << nextcolorshift;
             ++nextcolorshift;
         } else if (current->filterfile != NULL && current->mcastaddr == NULL) {
-            current->color = 0x1;
+            current->color = 0x0;
             ++nostreamcount;
         } else if (current->filterfile == NULL && current->mcastaddr != NULL) {
-            current->color = 0x0;
+            current->color = 0x1;
             ++nofiltercount;
         } else {
             /* Both NULL. */

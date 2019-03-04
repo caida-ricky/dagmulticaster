@@ -95,14 +95,11 @@ endcpucheck:
     return cpuid;
 }
 
-int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
-
+int init_dag_stream(dagstreamthread_t *dst) {
     struct timeval maxwait, poll;
     dag_size_t mindata;
-    int sock;
-    struct addrinfo *targetinfo;
 
-    /* Set polling parameters
+    /* Set polling parameters.
      * TODO: are these worth making configurable?
      * Currently defined in dagmultiplexer.h.
      */
@@ -119,7 +116,7 @@ int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
         return -1;
     }
 
-    /* Start stream */
+    /* Start stream. */
     if (dag_start_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
         fprintf(stderr, "Failed to start DAG stream %d: %s\n",
                 dst->params.streamnum, strerror(errno));
@@ -127,19 +124,25 @@ int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
     }
 
     dst->streamstarted = 1;
+    return 0;
+}
 
-    /* Create an exporting socket */
-    sock = ndag_create_multicaster_socket(dst->params.exportport,
-            dst->params.multicastgroup, dst->params.sourceaddr, &targetinfo);
+int init_dag_sink(ndag_encap_params_t *state, streamsink_t *params, int streamnum,
+        uint64_t globalstart) {
+    int sock;
+    struct addrinfo *targetinfo;
+
+    /* Create an exporting socket. */
+    sock = ndag_create_multicaster_socket(params->exportport,
+        params->multicastgroup, params->sourceaddr, &targetinfo);
     if (sock == -1) {
         fprintf(stderr, "Failed to create multicaster socket for DAG stream %d\n",
-                dst->params.streamnum);
+            streamnum);
         return -1;
     }
 
-    ndag_init_encap(state, sock, targetinfo, dst->params.monitorid,
-            dst->params.streamnum, dst->params.globalstart, dst->params.mtu,
-            0);
+    ndag_init_encap(state, sock, targetinfo, params->monitorid, streamnum,
+        globalstart, params->mtu, 0);
     return sock;
 }
 
@@ -213,14 +216,16 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
     }
 }
 
+/* MAYBE: Don't assume DAG_COLOR_SLOTS and pass an argument instead? */
 void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         uint16_t(*walk_records)(char **, char *, dagstreamthread_t *,
-                uint16_t *, ndag_encap_params_t *)) {
+            uint16_t *, ndag_encap_params_t *)) {
     void *bottom, *top;
     struct timeval timetaken, endtime, starttime, now;
     uint32_t nextstat = 0;
     uint16_t reccnt = 0;
     uint64_t allrecords = 0;
+    int i;
 
     bottom = NULL;
     top = NULL;
@@ -231,9 +236,15 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         nextstat = ((starttime.tv_sec / dst->params.statinterval) *
                     dst->params.statinterval) + dst->params.statinterval;
     }
+
+    /* Track which state has new data. */
+    uint16_t savedtosend[DAG_COLOR_SLOTS];
+
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
-        uint16_t savedtosend = 0;
+
+        /* Reset flags in each loop. */
+        memset(savedtosend, 0, sizeof(savedtosend));
 
         // should we log stats now?
         // TODO: consider checking the time every N iterations
@@ -255,28 +266,35 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
             dst->idletime += DAG_POLL_MAXWAIT;
 
             if (dst->idletime > 5 * 1000000) {
-                if (ndag_send_keepalive(state) < 0) {
-                    break;
+                for (i = 0; i < dst->inuse; ++i) {
+                    if (ndag_send_keepalive(&state[i]) < 0) {
+                        break;
+                    }
                 }
                 dst->idletime = 0;
             }
             continue;
         }
 
-        ndag_reset_encap_state(state);
+        for (i = 0; i < dst->inuse; ++i) {
+            ndag_reset_encap_state(&state[i]);
+        }
 
         reccnt = walk_records((char **)(&bottom), (char *)top, dst,
-                &savedtosend, state);
+                savedtosend, state);
         dst->stats.walked_buffers++;
         allrecords += reccnt;
         dst->stats.tx_records += reccnt;
-        dst->stats.tx_datagrams += savedtosend;
+        // TODO: Should stats be an array?
+        //dst->stats.tx_datagrams += savedtosend;
         /* account for message headers: */
-        dst->stats.tx_bytes += savedtosend * ENCAP_OVERHEAD;
+        //dst->stats.tx_bytes += savedtosend * ENCAP_OVERHEAD;
 
-        if (savedtosend > 0) {
-            if (ndag_send_encap_records(state, savedtosend) == 0) {
-                break;
+        for (i = 0; i < dst->inuse; ++i) {
+            if (savedtosend[i] > 0) {
+                if (ndag_send_encap_records(&state[i], savedtosend[i]) == 0) {
+                    break;
+                }
             }
         }
     }
@@ -288,12 +306,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
             (int)timetaken.tv_usec);
 }
 
-void halt_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
-
-    if (state) {
-        ndag_close_multicaster_socket(state->sock, state->target);
-    }
-
+void halt_dag_stream(dagstreamthread_t *dst) {
     if (dst->streamstarted) {
         if (dag_stop_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
             fprintf(stderr, "Error while stopping DAG stream %d: %s\n",
@@ -304,6 +317,12 @@ void halt_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
     if (dag_detach_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
         fprintf(stderr, "Error while detaching DAG stream %d: %s\n",
                 dst->params.streamnum, strerror(errno));
+    }
+}
+
+void halt_dag_sink(ndag_encap_params_t *state) {
+    if (state) {
+        ndag_close_multicaster_socket(state->sock, state->target);
     }
 }
 
@@ -399,7 +418,6 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
             (void *)nextslot);
 #endif
 
-
     if (ret != 0) {
         return -1;
     }
@@ -409,10 +427,13 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
 
 static void dst_destroy(dagstreamthread_t *dst,
                         void (*destroyfunc)(void *)) {
+    int i;
     if (!dst->threadstarted) {
         return;
     }
-    free(dst->iovs);
+    for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
+        free(dst->iovs[i]);
+    }
     if (destroyfunc) {
         destroyfunc(dst->extra);
     }
@@ -431,7 +452,7 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     sigset_t sig_before, sig_block_all;
     int ret, i, j;
     int threadcount = 0;
-    int filter_offset = 0;
+    int filteroffset = 0;
     // TODO: Or should this be a pointer to an array?
     beaconthread_t *beacons = NULL;
     uint8_t *cpumap = NULL;
@@ -449,8 +470,8 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         goto halteverything;
     }
 
-    // TODO: Base first port on number of threads for filters / beacons.
-    filter_offset = maxstreams * 4;
+    /* TODO: Might need a better approach here. */
+    filteroffset = maxstreams * 4;
 
     beacons = (beaconthread_t *)(malloc(sizeof(beaconthread_t) * beaconcnt));
     if (beacons == NULL) {
@@ -486,15 +507,20 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         }
 
         dst->params = *sparams;
-        dst->iovs = (struct iovec *)malloc(sizeof(struct iovec) * 2);
-        dst->iov_alloc = 2;
+        for (j = 0; j < DAG_COLOR_SLOTS; ++j) {
+            dst->iovs[j] = (struct iovec *) malloc(sizeof(struct iovec) * 2);
+            dst->iov_alloc[j] = 2;
+        }
         dst->idletime = 0;
-        dst->params.exportport = firstport + (i * DAG_MULTIPLEX_PORT_INCR);
+        for (j = 0; j < dst->params.sinkcnt; ++j) {
+            dst->params.sinks[j].exportport =
+                filteroffset * j + firstport + (i * DAG_MULTIPLEX_PORT_INCR);
+            assert(dst->params.sinks[j].exportport <= 65534);
+        }
         dst->params.streamnum = i * 2;
         dst->streamstarted = 0;
         memset(&dst->stats, 0, sizeof(streamstats_t));
 
-        assert(dst->params.exportport <= 65534);
 
         ret = start_dag_thread(dst, cpumap, processfunc);
 
@@ -531,13 +557,13 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         /* Pass non-owning pointer beacon. Will be cleaned up in telescope. */
         beacons[i].params = &bparams[i];
         beacons[i].params->numstreams = threadcount;
-        beacons[i].params->streamports = 
+        beacons[i].params->streamports =
             (uint16_t *)malloc(sizeof(uint16_t) * threadcount);
 
         // TODO: This is not right anymore?
         for (j = 0; j < threadcount; j++) {
             beacons[i].params->streamports[j] =
-                filter_offset * i  + firstport + (DAG_MULTIPLEX_PORT_INCR * j);
+                filteroffset * i  + firstport + (DAG_MULTIPLEX_PORT_INCR * j);
         }
 
         /* Create beaconing thread */
@@ -572,7 +598,7 @@ halteverything:
         }
         free(dagthreads);
     }
-    
+
     for (i = 0; i < beaconcnt; ++i) {
         if (beacons[i].params->streamports) {
             free(beacons[i].params->streamports);
