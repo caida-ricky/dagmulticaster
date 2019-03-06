@@ -73,6 +73,8 @@ typedef struct dsthread {
     struct iovec *iovs[DAG_COLOR_SLOTS];
     /* Sizes for each array. */
     uint16_t iov_alloc[DAG_COLOR_SLOTS];
+    /* Maximum amount of bytes to collect for one datagram. */
+    uint16_t iov_maxsizes[DAG_COLOR_SLOTS];
     /* Number of colors in use. */
     uint16_t inuse;
 
@@ -82,7 +84,6 @@ typedef struct dsthread {
     /* Application specific storage. */
     void *extra;
 } dagstreamthread_t;
-
 
 typedef struct beaconthread {
     pthread_t tid;

@@ -85,7 +85,6 @@ static char * walk_stream_buffer(char *bottom, char *top,
     uint32_t walked = 0;
     uint32_t wwalked = 0;
     uint32_t tx_wire = 0;
-    uint16_t maxsize;
     int i;
     int color = 0;
     int non_default_open = 0; // Track if previous packet had a non-default sink.
@@ -95,15 +94,6 @@ static char * walk_stream_buffer(char *bottom, char *top,
         fprintf(stderr, "Need at least one sink to write to.\n");
     }
 
-    /* Find sink with smallest MTU. */
-    maxsize = dst->params.sinks[0].mtu;
-    for (i = 1; i < dst->params.sinkcnt; ++i) {
-        if (dst->params.sinks[i].mtu < maxsize) {
-            maxsize = dst->params.sinks[i].mtu;
-        }
-    }
-    maxsize -= ENCAP_OVERHEAD;
-
     /* Nothing collected atm. */
     memset(collected, 0, sizeof(collected));
 
@@ -112,7 +102,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
         dst->iovs[i][curiov[i]].iov_len = 0;
     }
 
-    while (bottom < top && walked < maxsize) {
+    /* Remove this check from the loop: `&& walked < maxsize`. I think that is
+     * checked before appending data to an iovec. */
+    while (bottom < top) {
         dag_record_t *erfhdr = (dag_record_t *)bottom;
         uint16_t len = ntohs(erfhdr->rlen);
         uint16_t wlen = ntohs(erfhdr->wlen);
@@ -162,7 +154,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
         /* The default case should be fast. Lot's of indirections here. */
         if (color == 1) {
             i = leading_zeros(0); // Should be 0.
-            if (collected[i] > 0 && collected[i] + len > maxsize) {
+            if (collected[i] > 0 && collected[i] + len > dst->iov_maxsizes[i]) {
                 /* Current record would push us over the end of our datagram */
                 break;
             }
@@ -182,7 +174,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
              * Otherwise we risk appending a packet to the same sink twice.*/
             for (i = 1; i < dst->inuse; ++i) {
                 if (IS_SET(color, i) && collected[i] > 0
-                        && collected[i] + len > maxsize) {
+                        && collected[i] + len > dst->iov_maxsizes[i]) {
                     goto stopwalking;
                 }
             }
@@ -224,8 +216,11 @@ stopwalking:
      * very large. This is intentional; the multicaster will truncate the
      * packet record if it is too big and set the truncation flag.
      */
-    if (walked > maxsize) {
-        dst->stats.truncated_records++;
+    for (i = 0; i < dst->inuse; ++i) {
+        if (collected[i] > dst->iov_maxsizes[i]) {
+            dst->stats.truncated_records++;
+            break;
+        }
     }
 
     return bottom;
@@ -296,7 +291,7 @@ static void *per_dagstream(void *threaddata) {
     dagstreamthread_t *dst = (dagstreamthread_t *)threaddata;
     ndag_encap_params_t state[DAG_COLOR_SLOTS];
     int initialized = 0;
-    int i, res, index;
+    int i, res, idx;
 
     /* Sanity check. */
     if (dst->params.sinkcnt == 0 || dst->params.sinks == NULL) {
@@ -316,10 +311,12 @@ static void *per_dagstream(void *threaddata) {
 
     /* Color bit indices should match the iovec position to make lookup easy. */
     for (initialized = 0; initialized < dst->params.sinkcnt; ++initialized) {
-        /* Use the color bit position as an index for the state. */
-        index = leading_zeros(dst->params.sinks[initialized].color);
-        res = init_dag_sink(&state[index], &dst->params.sinks[initialized],
+        /* The color bit position is our index. */
+        idx = leading_zeros(dst->params.sinks[initialized].color);
+        res = init_dag_sink(&state[idx], &dst->params.sinks[initialized],
             dst->params.streamnum, dst->params.globalstart);
+        dst->iov_maxsizes[idx] =
+            dst->params.sinks[initialized].mtu - ENCAP_OVERHEAD;
         if (res == -1) {
             goto perdagstreamexit;
         }
