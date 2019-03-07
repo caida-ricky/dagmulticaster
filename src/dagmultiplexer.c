@@ -149,28 +149,24 @@ int init_dag_sink(ndag_encap_params_t *state, streamsink_t *params, int streamnu
 static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
     iow_t *logf = NULL;
     char buf[1024];
+    int i;
 
     if (dst->params.statdir) {
         snprintf(buf, sizeof(buf), "%s/ndag.stream-%02d.stats",
                  dst->params.statdir, dst->params.streamnum);
         if ((logf = wandio_wcreate(buf, WANDIO_COMPRESS_NONE,
                                    0, O_CREAT)) == NULL) {
-            /* could be transient failure, so just log and move on */
+            /* Could be transient failure, so just log and move on. */
             fprintf(stderr, "Failed to create stats file %s\n", buf);
             return;
         }
-        snprintf(buf, sizeof(buf),
-                 "time %d\n"
+        wandio_printf(logf, "time %d\n"
                  "stats_interval %d\n"
                  "stream %d\n"
                  "walked_buffers %"PRIu64"\n"
                  "walked_records %"PRIu64"\n"
                  "walked_bytes %"PRIu64"\n"
                  "walked_wire_bytes %"PRIu64"\n"
-                 "tx_datagrams %"PRIu64"\n"
-                 "tx_records %"PRIu64"\n"
-                 "tx_bytes %"PRIu64"\n"
-                 "tx_wire_bytes %"PRIu64"\n"
                  "dropped_records %"PRIu64"\n"
                  "truncated_records %"PRIu64"\n",
                  (int)now.tv_sec,
@@ -180,13 +176,19 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  dst->stats.walked_records,
                  dst->stats.walked_bytes,
                  dst->stats.walked_wbytes,
-                 dst->stats.tx_datagrams,
-                 dst->stats.tx_records,
-                 dst->stats.tx_bytes,
-                 dst->stats.tx_wbytes,
                  dst->stats.dropped_records,
                  dst->stats.truncated_records);
-        wandio_wwrite(logf, buf, strlen(buf));
+        for (i = 0; i < dst->inuse; ++i) {
+            wandio_printf(logf,
+                 "tx_datagrams %"PRIu64"\n"
+                 "tx_records %"PRIu64"\n"
+                 "tx_bytes %"PRIu64"\n"
+                 "tx_wire_bytes %"PRIu64"\n",
+                 dst->stats.sinks[i].tx_datagrams,
+                 dst->stats.sinks[i].tx_records,
+                 dst->stats.sinks[i].tx_bytes,
+                 dst->stats.sinks[i].tx_wbytes);
+        }
         wandio_wdestroy(logf);
     } else {
         fprintf(stderr,
@@ -195,10 +197,6 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 "walked_records:%"PRIu64" "
                 "walked_bytes:%"PRIu64" "
                 "walked_wire_bytes:%"PRIu64" "
-                "tx_datagrams:%"PRIu64" "
-                "tx_records:%"PRIu64" "
-                "tx_bytes:%"PRIu64" "
-                "tx_wire_bytes:%"PRIu64" "
                 "dropped_records:%"PRIu64" "
                 "truncated_records %"PRIu64"\n",
                 (int)now.tv_sec,
@@ -207,24 +205,29 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 dst->stats.walked_records,
                 dst->stats.walked_bytes,
                 dst->stats.walked_wbytes,
-                dst->stats.tx_datagrams,
-                dst->stats.tx_records,
-                dst->stats.tx_bytes,
-                dst->stats.tx_wbytes,
                 dst->stats.dropped_records,
                 dst->stats.truncated_records);
+        for (i = 0; i < dst->inuse; ++i) {
+            fprintf(stderr,
+                 "tx_datagrams %"PRIu64"\n"
+                 "tx_records %"PRIu64"\n"
+                 "tx_bytes %"PRIu64"\n"
+                 "tx_wire_bytes %"PRIu64"\n",
+                 dst->stats.sinks[i].tx_datagrams,
+                 dst->stats.sinks[i].tx_records,
+                 dst->stats.sinks[i].tx_bytes,
+                 dst->stats.sinks[i].tx_wbytes);
+        }
     }
 }
 
 /* MAYBE: Don't assume DAG_COLOR_SLOTS and pass an argument instead? */
 void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
-        uint16_t(*walk_records)(char **, char *, dagstreamthread_t *,
-            uint16_t *, ndag_encap_params_t *)) {
+        void(*walk_records)(char **, char *, dagstreamthread_t *,
+            uint16_t *, uint16_t *, ndag_encap_params_t *)) {
     void *bottom, *top;
     struct timeval timetaken, endtime, starttime, now;
     uint32_t nextstat = 0;
-    uint16_t reccnt = 0;
-    uint64_t allrecords = 0;
     int i;
 
     bottom = NULL;
@@ -237,16 +240,18 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
                     dst->params.statinterval) + dst->params.statinterval;
     }
 
-    /* Track which state has new data. */
+    /* Count datagrams and records. */
     uint16_t savedtosend[DAG_COLOR_SLOTS];
+    uint16_t records_walked[DAG_COLOR_SLOTS];
 
     /* DO dag_advance_stream WHILE not interrupted and not error */
     while (!halted && !paused) {
 
-        /* Reset flags in each loop. */
+        /* Reset stats in each loop. */
         memset(savedtosend, 0, sizeof(savedtosend));
+        memset(records_walked, 0, sizeof(records_walked));
 
-        // should we log stats now?
+        // Should we log stats now?
         // TODO: consider checking the time every N iterations
         gettimeofday(&now, NULL);
         if (now.tv_sec >= nextstat) {
@@ -280,15 +285,18 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
             ndag_reset_encap_state(&state[i]);
         }
 
-        reccnt = walk_records((char **)(&bottom), (char *)top, dst,
-                savedtosend, state);
+        walk_records((char **)(&bottom), (char *)top, dst, savedtosend,
+                records_walked, state);
+
+        /* Record stats. */
         dst->stats.walked_buffers++;
-        allrecords += reccnt;
-        dst->stats.tx_records += reccnt;
-        // TODO: Should stats be an array?
-        //dst->stats.tx_datagrams += savedtosend;
-        /* account for message headers: */
-        //dst->stats.tx_bytes += savedtosend * ENCAP_OVERHEAD;
+        for (i = 0; i < dst->inuse; ++i) {
+            dst->stats.sinks[i].tx_records += records_walked[i];
+            dst->stats.sinks[i].tx_datagrams += savedtosend[i];
+            /* Account for message headers. */
+            dst->stats.sinks[i].tx_bytes += savedtosend[i] * ENCAP_OVERHEAD;
+        }
+
 
         for (i = 0; i < dst->inuse; ++i) {
             if (savedtosend[i] > 0) {
@@ -302,7 +310,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
     gettimeofday(&endtime, NULL);
     timersub(&endtime, &starttime, &timetaken);
     fprintf(stderr, "Halting stream %d after processing %lu records in %d.%d seconds\n",
-            dst->params.streamnum, allrecords, (int)timetaken.tv_sec,
+            dst->params.streamnum, dst->stats.walked_records, (int)timetaken.tv_sec,
             (int)timetaken.tv_usec);
 }
 
@@ -456,7 +464,6 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     int ret, i, j;
     int threadcount = 0;
     int filteroffset = 0;
-    // TODO: Or should this be a pointer to an array?
     beaconthread_t *beacons = NULL;
     uint8_t *cpumap = NULL;
 

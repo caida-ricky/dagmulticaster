@@ -79,12 +79,14 @@ static void end(iov_data_t *iov, uint16_t *curiov) {
 }
 
 static char * walk_stream_buffer(char *bottom, char *top,
-        uint16_t *reccount, uint16_t *curiov, dagstreamthread_t *dst,
-        darkfilter_t *filter, uint16_t* dirty) {
+        uint16_t *total_reccount, uint16_t *curiov,
+        dagstreamthread_t *dst, darkfilter_t *filter,
+        uint16_t* reccounts) {
     uint32_t collected[DAG_COLOR_SLOTS];
+    uint32_t tx[DAG_COLOR_SLOTS];
+    uint32_t txw[DAG_COLOR_SLOTS];
     uint32_t walked = 0;
     uint32_t wwalked = 0;
-    uint32_t tx_wire = 0;
     int i;
     int color = 0;
     int non_default_open = 0; // Track if previous packet had a non-default sink.
@@ -96,6 +98,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
 
     /* Nothing collected atm. */
     memset(collected, 0, sizeof(collected));
+    memset(tx, 0, sizeof(tx));
+    memset(txw, 0, sizeof(txw));
 
     for (i = 0; i < dst->inuse; ++i) {
         dst->iovs[i].vec[curiov[i]].iov_base = NULL;
@@ -136,15 +140,11 @@ static char * walk_stream_buffer(char *bottom, char *top,
                 dst->stats.walked_records++;
                 dst->stats.walked_bytes += len;
                 dst->stats.walked_wbytes += wlen;
-                //dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
-                dst->stats.tx_wbytes += tx_wire;
 
                 /* Close running iovecs. */
                 for (i = 0; i < dst->inuse; ++i) {
                     end(&dst->iovs[i], &curiov[i]);
                 }
-
-                tx_wire = 0;
 
                 /* Next packet. */
                 continue;
@@ -158,8 +158,10 @@ static char * walk_stream_buffer(char *bottom, char *top,
                 /* Current record would push us over the end of our datagram */
                 break;
             }
+            tx[i] += len;
+            txw[i] += wlen;
+            reccounts[i] += 1;
             append(&dst->iovs[i], curiov[i], i, bottom, len, &collected[i]);
-            dirty[i] += 1;
 
             /* Close all running non-default iovecs. Technically,
              * this means skipping the first entry. */
@@ -182,7 +184,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
             /* Iterate over all colors, need to close default if it was open. */
             for (i = 0; i < dst->inuse; ++i) {
                 if (IS_SET(color, i)) {
-                    dirty[i] += 1;
+                    tx[i] += len;
+                    txw[i] += wlen;
+                    reccounts[i] += 1;
                     append(&dst->iovs[i], curiov[i], i, bottom, len, &collected[i]);
                 } else {
                     end(&dst->iovs[i], &curiov[i]);
@@ -194,13 +198,12 @@ static char * walk_stream_buffer(char *bottom, char *top,
         }
 
         /* Record local stats. */
-        tx_wire += wlen;
         walked += len;
         wwalked += wlen;
 
         /* Global stats and progress. */
         bottom += len;
-        (*reccount)++;
+        ++(*total_reccount);
         dst->stats.walked_records++;
     }
 
@@ -208,9 +211,10 @@ stopwalking:
     /* Write local stats to global info. */
     dst->stats.walked_bytes += walked;
     dst->stats.walked_wbytes += wwalked;
-    // TODO: Should this be an array or sink-specific stat?
-    //dst->stats.tx_bytes += dst->iovs[*curiov].iov_len;
-    dst->stats.tx_wbytes += tx_wire;
+    for (i = 0; i < dst->inuse; ++i) {
+        dst->stats.sinks[i].tx_bytes += tx[i];
+        dst->stats.sinks[i].tx_wbytes += txw[i];
+    }
 
     /* Walked can be larger than maxsize if the first record is
      * very large. This is intentional; the multicaster will truncate the
@@ -226,21 +230,17 @@ stopwalking:
     return bottom;
 }
 
-uint16_t telescope_walk_records(char **bottom, char *top,
+void telescope_walk_records(char **bottom, char *top,
         dagstreamthread_t *dst, uint16_t *savedtosend,
-        ndag_encap_params_t *state) {
+        uint16_t *records_walked_total, ndag_encap_params_t *state) {
 
     uint16_t available[DAG_COLOR_SLOTS];
-    uint16_t dirty[DAG_COLOR_SLOTS];
-    uint16_t total_walked = 0;
-    uint16_t records_walked = 0;
+    uint16_t records_walked[DAG_COLOR_SLOTS];
+    uint16_t records_walked_loop;
     int i, max;
 
     /* Get our application-specific state. */
     darkfilter_t *filter = (darkfilter_t *)dst->extra;
-
-    /* Initialive available packet count to 0. */
-    memset(available, 0, sizeof(available));
 
     /* Sadly, we have to walk whatever dag_advance_stream gives us because
      *   a) top is not guaranteed to be on a packet boundary.
@@ -250,27 +250,31 @@ uint16_t telescope_walk_records(char **bottom, char *top,
      */
 
     do {
-        /* Dirty flags for each iteration. */
-        memset(dirty, 0, sizeof(available));
+        records_walked_loop = 0;
 
-        records_walked = 0;
+        /* Iteration data. */
+        memset(available, 0, sizeof(available));
+        memset(records_walked, 0, sizeof(records_walked));
+
         (*bottom) = walk_stream_buffer((*bottom), top,
-                &records_walked, available, dst, filter, dirty);
+                &records_walked_loop, available, dst, filter, records_walked);
 
-        total_walked += records_walked;
-        if (records_walked > 0) {
+        if (records_walked_loop > 0) {
             dst->idletime = 0;
 
             /* Append all new iovecs to ndag stream. */
             for (i = 0; i < dst->inuse; ++i) {
-                if (dirty[i]) {
+                if (records_walked[i] > 0) {
                     if (ndag_push_encap_iovecs(&state[i], dst->iovs[i].vec,
-                                available[i] + 1, records_walked,
+                                available[i] + 1, records_walked[i],
                                     savedtosend[i]) == 0) {
                         halt_program();
                         break;
                     }
                     savedtosend[i] += 1;
+
+                    /* Collect overall processed records. */
+                    records_walked_total[i] += records_walked[i];
                 }
             }
         }
@@ -282,9 +286,7 @@ uint16_t telescope_walk_records(char **bottom, char *top,
                 max = savedtosend[i];
             }
         }
-    } while (!is_halted() && records_walked > 0 && max < NDAG_BATCH_SIZE);
-
-    return total_walked;
+    } while (!is_halted() && records_walked_loop > 0 && max < NDAG_BATCH_SIZE);
 }
 
 static void *per_dagstream(void *threaddata) {

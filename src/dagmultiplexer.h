@@ -10,15 +10,14 @@
 
 #define ENCAP_OVERHEAD (sizeof(ndag_common_t) + sizeof(ndag_encap_t))
 
-/* Should be this value, but I'm unsure about compile-time evaluation in C:
- * (sizeof(color_t) * 8). Bascially it is one slot per potential bit in the
- * color. Note that no bit will drop packets and does not require a slot. */
-#define DAG_COLOR_SLOTS 8
-
 #include "ndagmulticaster.h"
 
 /* Our color type, currently 8 bit. Used as a bit-field. */
 typedef uint8_t color_t;
+
+/* One slot per bit in the color. Note that no bit (color 0) will drop packets
+ * and does not require a slot. */
+#define DAG_COLOR_SLOTS (sizeof(color_t) * 8)
 
 /* Parameters to configure a (multicast) sink. */
 typedef struct streamsink {
@@ -43,7 +42,15 @@ typedef struct streamparams {
     streamsink_t *sinks;
 } streamparams_t;
 
-/* Stats for a stream. */
+/* Stats for a multicast sink. */
+typedef struct streamsinkstats {
+    uint64_t tx_datagrams; // number of multicast datagrams tx'd
+    uint64_t tx_records; // number of ERF records (packets) tx'd
+    uint64_t tx_bytes; // number of bytes tx'd
+    uint64_t tx_wbytes; // number of "wire" bytes tx'd (excl. ERF headers)
+} streamsinkstats_t;
+
+/* Performance stats. */
 typedef struct streamstats {
     /* DAG stream walking stats. */
     uint64_t walked_buffers; // number of stream buffers walked
@@ -52,10 +59,7 @@ typedef struct streamstats {
     uint64_t walked_wbytes; // number of "wire" bytes walked (excl. ERF headers)
 
     /* nDAG transmit stats. */
-    uint64_t tx_datagrams; // number of multicast datagrams tx'd
-    uint64_t tx_records; // number of ERF records (packets) tx'd
-    uint64_t tx_bytes; // number of bytes tx'd
-    uint64_t tx_wbytes; // number of "wire" bytes tx'd (excl. ERF headers)
+    streamsinkstats_t sinks[DAG_COLOR_SLOTS];
 
     /* Error stats. */
     uint64_t dropped_records; // number of records dropped (according to DAG)
@@ -123,8 +127,8 @@ int init_dag_stream(dagstreamthread_t *dst);
 int init_dag_sink(ndag_encap_params_t *state, streamsink_t *params,
         int streamnum, uint64_t globalstart);
 void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
-        uint16_t(*walk_records)(char **, char *, dagstreamthread_t *,
-            uint16_t *, ndag_encap_params_t *));
+        void(*walk_records)(char **, char *, dagstreamthread_t *,
+            uint16_t *, uint16_t *, ndag_encap_params_t *));
 void halt_dag_stream(dagstreamthread_t *dst);
 void halt_dag_sink(ndag_encap_params_t *state);
 int create_multiplex_beaconer(beaconthread_t *bthread);
