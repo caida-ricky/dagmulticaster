@@ -25,51 +25,6 @@
 
 #define CURRENT_EXCLUDE(filter) ((filter)->exclude[(filter)->current_exclude])
 
-/* TODO port to libwandio?? */
-static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp) {
-    char cbuf;
-    int rval;
-    int i;
-    int done = 0;
-
-    if (file == NULL) {
-        return 0;
-    }
-
-    if(buffer == NULL || len <= 0)
-    {
-        return 0;
-    }
-
-    for(i=0; !done && i < len-1; i++)
-    {
-        if((rval = wandio_read(file, &cbuf, 1)) < 0)
-        {
-            return rval;
-        }
-        if(rval == 0)
-        {
-            done = 1;
-            i--;
-        }
-        else
-        {
-            ((char*)buffer)[i] = cbuf;
-            if(cbuf == '\n')
-            {
-                if(chomp != 0)
-                {
-                    ((char*)buffer)[i] = '\0';
-                }
-                done = 1;
-            }
-        }
-    }
-
-    ((char*)buffer)[i] = '\0';
-    return i;
-}
-
 static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file) {
     io_t *file;
     char buf[1024];
