@@ -54,27 +54,27 @@ static void reload_signal(int signal) {
 }
 
 /* Add the packet to the state with color. Note down collected bytes. */
-static void append(dagstreamthread_t *dst, uint16_t curiov, int color,
+static void append(iov_data_t *iov, uint16_t curiov, int color,
         char *bottom, uint16_t len, uint32_t *collected) {
-    if (dst->iovs[color][curiov].iov_base == NULL) {
-        dst->iovs[color][curiov].iov_base = bottom;
+    if (iov->vec[curiov].iov_base == NULL) {
+        iov->vec[curiov].iov_base = bottom;
     }
-    dst->iovs[color][curiov].iov_len += len;
-    collected[color] += len;
+    iov->vec[curiov].iov_len += len;
+    *collected += len;
 }
 
 /* End an iov and allocate a new one if necessary. */
-static void end(dagstreamthread_t *dst, uint16_t *curiov, int color) {
-    if (dst->iovs[color][*curiov].iov_len != 0) {
+static void end(iov_data_t *iov, uint16_t *curiov) {
+    if (iov->vec[*curiov].iov_len != 0) {
         *curiov = *curiov + 1;
         /* Allocate more iovs if we don't have enough. */
-        if (*curiov == dst->iov_alloc[color]) {
-            dst->iovs[color] = (struct iovec *) realloc(dst->iovs[color],
-                    sizeof(struct iovec) * (dst->iov_alloc[color] + 10));
-            dst->iov_alloc[color] += 10;
+        if (*curiov == iov->len) {
+            iov->vec = (struct iovec *) realloc(iov->vec,
+                    sizeof(struct iovec) * (iov->len + 10));
+            iov->len += 10;
         }
-        dst->iovs[color][*curiov].iov_base = NULL;
-        dst->iovs[color][*curiov].iov_len = 0;
+        iov->vec[*curiov].iov_base = NULL;
+        iov->vec[*curiov].iov_len = 0;
     }
 }
 
@@ -98,8 +98,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
     memset(collected, 0, sizeof(collected));
 
     for (i = 0; i < dst->inuse; ++i) {
-        dst->iovs[i][curiov[i]].iov_base = NULL;
-        dst->iovs[i][curiov[i]].iov_len = 0;
+        dst->iovs[i].vec[curiov[i]].iov_base = NULL;
+        dst->iovs[i].vec[curiov[i]].iov_len = 0;
     }
 
     /* Remove this check from the loop: `&& walked < maxsize`. I think that is
@@ -141,7 +141,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
 
                 /* Close running iovecs. */
                 for (i = 0; i < dst->inuse; ++i) {
-                    end(dst, &curiov[i], i);
+                    end(&dst->iovs[i], &curiov[i]);
                 }
 
                 tx_wire = 0;
@@ -154,18 +154,18 @@ static char * walk_stream_buffer(char *bottom, char *top,
         /* The default case should be fast. Lot's of indirections here. */
         if (color == 1) {
             i = leading_zeros(0); // Should be 0.
-            if (collected[i] > 0 && collected[i] + len > dst->iov_maxsizes[i]) {
+            if (collected[i] > 0 && collected[i] + len > dst->iovs[i].maxsize) {
                 /* Current record would push us over the end of our datagram */
                 break;
             }
-            append(dst, curiov[i], i, bottom, len, collected);
+            append(&dst->iovs[i], curiov[i], i, bottom, len, &collected[i]);
             dirty[i] += 1;
 
             /* Close all running non-default iovecs. Technically,
              * this means skipping the first entry. */
             if (non_default_open) {
                 for (i = 1; i < dst->inuse; ++i) {
-                    end(dst, &curiov[i], i);
+                    end(&dst->iovs[i], &curiov[i]);
                 }
             }
             non_default_open = 0;
@@ -174,7 +174,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
              * Otherwise we risk appending a packet to the same sink twice.*/
             for (i = 1; i < dst->inuse; ++i) {
                 if (IS_SET(color, i) && collected[i] > 0
-                        && collected[i] + len > dst->iov_maxsizes[i]) {
+                        && collected[i] + len > dst->iovs[i].maxsize) {
                     goto stopwalking;
                 }
             }
@@ -183,9 +183,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
             for (i = 0; i < dst->inuse; ++i) {
                 if (IS_SET(color, i)) {
                     dirty[i] += 1;
-                    append(dst, curiov[i], i, bottom, len, collected);
+                    append(&dst->iovs[i], curiov[i], i, bottom, len, &collected[i]);
                 } else {
-                    end(dst, &curiov[i], i);
+                    end(&dst->iovs[i], &curiov[i]);
                 }
             }
 
@@ -217,7 +217,7 @@ stopwalking:
      * packet record if it is too big and set the truncation flag.
      */
     for (i = 0; i < dst->inuse; ++i) {
-        if (collected[i] > dst->iov_maxsizes[i]) {
+        if (collected[i] > dst->iovs[i].maxsize) {
             dst->stats.truncated_records++;
             break;
         }
@@ -264,7 +264,7 @@ uint16_t telescope_walk_records(char **bottom, char *top,
             /* Append all new iovecs to ndag stream. */
             for (i = 0; i < dst->inuse; ++i) {
                 if (dirty[i]) {
-                    if (ndag_push_encap_iovecs(&state[i], dst->iovs[i],
+                    if (ndag_push_encap_iovecs(&state[i], dst->iovs[i].vec,
                                 available[i] + 1, records_walked,
                                     savedtosend[i]) == 0) {
                         halt_program();
@@ -299,10 +299,8 @@ static void *per_dagstream(void *threaddata) {
         goto perdagstreamexit;
     }
 
-    for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
-        dst->iovs[i] = NULL;
-    }
-    memset(dst->iov_alloc, 0, sizeof(dst->iov_alloc));
+    /* Initialize iov data. */
+    memset(dst->iovs, 0, sizeof(dst->iovs));
 
     /* Initialize dagstream thread.*/
     if (init_dag_stream(dst) == -1) {
@@ -315,7 +313,7 @@ static void *per_dagstream(void *threaddata) {
         idx = leading_zeros(dst->params.sinks[initialized].color);
         res = init_dag_sink(&state[idx], &dst->params.sinks[initialized],
             dst->params.streamnum, dst->params.globalstart);
-        dst->iov_maxsizes[idx] =
+        dst->iovs[idx].maxsize =
             dst->params.sinks[initialized].mtu - ENCAP_OVERHEAD;
         if (res == -1) {
             goto perdagstreamexit;
@@ -339,8 +337,9 @@ perdagstreamexit:
 
     /* Clean up iovecs and their array. */
     for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
-        if (dst->iovs[i] != NULL) {
-            free(dst->iovs[i]);
+        if (dst->iovs[i].vec != NULL) {
+            free(dst->iovs[i].vec);
+            dst->iovs[i].len = 0;
         }
     }
 

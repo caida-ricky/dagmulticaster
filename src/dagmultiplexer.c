@@ -432,7 +432,10 @@ static void dst_destroy(dagstreamthread_t *dst,
         return;
     }
     for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
-        free(dst->iovs[i]);
+        if (dst->iovs[i].vec != NULL) {
+            free(dst->iovs[i].vec);
+            dst->iovs[i].len = 0;
+        }
     }
     if (destroyfunc) {
         destroyfunc(dst->extra);
@@ -508,8 +511,8 @@ int run_dag_streams(int dagfd, uint16_t firstport,
 
         dst->params = *sparams;
         for (j = 0; j < DAG_COLOR_SLOTS; ++j) {
-            dst->iovs[j] = (struct iovec *) malloc(sizeof(struct iovec) * 2);
-            dst->iov_alloc[j] = 2;
+            dst->iovs[j].vec = (struct iovec *) malloc(sizeof(struct iovec) * 2);
+            dst->iovs[j].len = 2;
         }
         dst->idletime = 0;
         for (j = 0; j < dst->params.sinkcnt; ++j) {

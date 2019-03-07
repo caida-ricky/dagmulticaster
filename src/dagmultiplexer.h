@@ -62,6 +62,13 @@ typedef struct streamstats {
     uint64_t truncated_records; // number of records truncated
 } streamstats_t;
 
+/* Data to manage one iovec. */
+typedef struct iov_data {
+    struct iovec *vec;
+    uint16_t len;
+    uint16_t maxsize;
+} iov_data_t;
+
 /* State to configure and run a dagstream thread. */
 typedef struct dsthread {
     streamparams_t params;
@@ -69,13 +76,9 @@ typedef struct dsthread {
     pthread_t tid;
     int threadstarted;
 
-    /* An iovec array, one for each color. */
-    struct iovec *iovs[DAG_COLOR_SLOTS];
-    /* Sizes for each array. */
-    uint16_t iov_alloc[DAG_COLOR_SLOTS];
-    /* Maximum amount of bytes to collect for one datagram. */
-    uint16_t iov_maxsizes[DAG_COLOR_SLOTS];
-    /* Number of colors in use. */
+    /* One entry for each color. */
+    iov_data_t iovs[DAG_COLOR_SLOTS];
+    /* Number of entries in use. */
     uint16_t inuse;
 
     uint8_t streamstarted;
