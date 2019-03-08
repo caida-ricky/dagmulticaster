@@ -180,13 +180,17 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  dst->stats.truncated_records);
         for (i = 0; i < dst->inuse; ++i) {
             wandio_printf(logf,
-                 "tx_datagrams %"PRIu64"\n"
-                 "tx_records %"PRIu64"\n"
-                 "tx_bytes %"PRIu64"\n"
-                 "tx_wire_bytes %"PRIu64"\n",
+                 "%s_tx_datagrams %"PRIu64"\n"
+                 "%s_tx_records %"PRIu64"\n"
+                 "%s_tx_bytes %"PRIu64"\n"
+                 "%s_tx_wire_bytes %"PRIu64"\n",
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_datagrams,
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_records,
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_bytes,
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_wbytes);
         }
         wandio_wdestroy(logf);
@@ -209,13 +213,17 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 dst->stats.truncated_records);
         for (i = 0; i < dst->inuse; ++i) {
             fprintf(stderr,
-                 "tx_datagrams %"PRIu64"\n"
-                 "tx_records %"PRIu64"\n"
-                 "tx_bytes %"PRIu64"\n"
-                 "tx_wire_bytes %"PRIu64"\n",
+                 "%s_tx_datagrams %"PRIu64"\n"
+                 "%s_tx_records %"PRIu64"\n"
+                 "%s_tx_bytes %"PRIu64"\n"
+                 "%s_tx_wire_bytes %"PRIu64"\n",
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_datagrams,
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_records,
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_bytes,
+                 dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_wbytes);
         }
     }

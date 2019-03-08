@@ -26,6 +26,7 @@ typedef struct streamsink {
     uint16_t exportport;
     char *multicastgroup;
     char *sourceaddr;
+    char *name; // non-owning reference, owned by config
     uint16_t mtu;
 } streamsink_t;
 
@@ -44,6 +45,7 @@ typedef struct streamparams {
 
 /* Stats for a multicast sink. */
 typedef struct streamsinkstats {
+    char* name; // non-owning reference, owned by config
     uint64_t tx_datagrams; // number of multicast datagrams tx'd
     uint64_t tx_records; // number of ERF records (packets) tx'd
     uint64_t tx_bytes; // number of bytes tx'd

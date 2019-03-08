@@ -28,6 +28,7 @@ typedef struct torrent {
     char *mcastaddr;
     char *srcaddr;
     char *filterfile;
+    char *name;
     uint16_t mcastport;
     uint16_t mtu;
     uint16_t monitorid;

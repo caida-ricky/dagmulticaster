@@ -311,12 +311,18 @@ static void *per_dagstream(void *threaddata) {
 
     /* Color bit indices should match the iovec position to make lookup easy. */
     for (initialized = 0; initialized < dst->params.sinkcnt; ++initialized) {
+        /* The colors are assigned in incrementing order, which should ensure
+         * that leading_zeros(color) returns their own index. The expection is
+         * the default route that _always_ has color 1 and might be positioned
+         * anywhere in the list. Hence the translation of the color to index.
+         */
         /* The color bit position is our index. */
         idx = leading_zeros(dst->params.sinks[initialized].color);
         res = init_dag_sink(&state[idx], &dst->params.sinks[initialized],
             dst->params.streamnum, dst->params.globalstart);
         dst->iovs[idx].maxsize =
             dst->params.sinks[initialized].mtu - ENCAP_OVERHEAD;
+        dst->stats.sinks[idx].name = dst->params.sinks[initialized].name;
         if (res == -1) {
             goto perdagstreamexit;
         }
@@ -550,6 +556,8 @@ int main(int argc, char **argv) {
             params.sinks[beaconindex].multicastgroup = itr->mcastaddr;
             params.sinks[beaconindex].monitorid = itr->monitorid;
             params.sinks[beaconindex].mtu = itr->mtu;
+            /* The config maintains ownership of the name. */
+            params.sinks[beaconindex].name = itr->name;
             /* Got one.*/
             beaconindex += 1;
         }

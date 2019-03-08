@@ -56,6 +56,7 @@ static int parse_torrents(telescope_global_t *glob,
         new->mtu = 0;
         new->monitorid = 0;
         new->next = NULL;
+        new->name = NULL;
 
         /* Make sure save the list in the global state. */
         if (glob->torrents == NULL) {
@@ -111,6 +112,11 @@ static int parse_torrents(telescope_global_t *glob,
                          && !strcmp((char *)key->data.scalar.value, "filterfile")) {
                 current->filterfile= strdup((char *)value->data.scalar.value);
             }
+
+            else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                         && !strcmp((char *)key->data.scalar.value, "name")) {
+                current->name= strdup((char *)value->data.scalar.value);
+            }
         }
 
         /* Set defaults if any entry besides the filterfile is set. */
@@ -128,6 +134,12 @@ static int parse_torrents(telescope_global_t *glob,
             if (current->monitorid == 0) {
                 fprintf(stderr,
                     "0 is not a valid monitor ID -- choose another number.\n");
+                goto torrentparseerror;
+            }
+
+            if (current->name == NULL) {
+                fprintf(stderr,
+                    "Please specify a name for each multicast sink.\n");
                 goto torrentparseerror;
             }
         }
@@ -336,6 +348,10 @@ void telescope_cleanup_torrent(torrent_t *torr) {
 
     if (torr->filterfile) {
         free(torr->filterfile);
+    }
+
+    if (torr->name) {
+        free(torr->name);
     }
 
     free(torr);
