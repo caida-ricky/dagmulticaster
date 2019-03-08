@@ -1,6 +1,7 @@
 
 #include <errno.h>
 #include <yaml.h>
+#include <assert.h>
 
 #include "telescope.h"
 
@@ -182,6 +183,20 @@ static int parse_torrents(telescope_global_t *glob,
     if (nostreamcount > 1) {
         fprintf(stderr, "Warning: More than one filter drops packets.\n");
     }
+
+    /* Move default route to the front of the list. */
+    new = glob->torrents;
+    /* Find entry. */
+    while (new->color != 1) {
+        /* We checked above that the default sink exists. */
+        assert(new != NULL);
+        current = new;
+        new = new->next;
+    }
+    /* Move it. */
+    current->next = new->next;
+    new->next = glob->torrents;
+    glob->torrents = new;
 
     glob->torrentcount = torrentcount;
     return torrentcount;
