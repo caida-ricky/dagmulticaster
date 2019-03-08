@@ -60,6 +60,9 @@ typedef struct streamstats {
     uint64_t walked_bytes; // number of bytes walked
     uint64_t walked_wbytes; // number of "wire" bytes walked (excl. ERF headers)
 
+    /* Filtered out stats. */
+    streamsinkstats_t filtered_out;
+
     /* nDAG transmit stats. */
     streamsinkstats_t sinks[DAG_COLOR_SLOTS];
 

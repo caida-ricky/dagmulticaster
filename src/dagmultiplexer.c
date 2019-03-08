@@ -167,6 +167,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  "walked_records %"PRIu64"\n"
                  "walked_bytes %"PRIu64"\n"
                  "walked_wire_bytes %"PRIu64"\n"
+                 "filtered_out_records %"PRIu64"\n"
+                 "filtered_out_bytes %"PRIu64"\n"
+                 "filtered_out_wire_bytes %"PRIu64"\n"
                  "dropped_records %"PRIu64"\n"
                  "truncated_records %"PRIu64"\n",
                  (int)now.tv_sec,
@@ -176,6 +179,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  dst->stats.walked_records,
                  dst->stats.walked_bytes,
                  dst->stats.walked_wbytes,
+                 dst->stats.filtered_out.tx_records,
+                 dst->stats.filtered_out.tx_bytes,
+                 dst->stats.filtered_out.tx_wbytes,
                  dst->stats.dropped_records,
                  dst->stats.truncated_records);
         for (i = 0; i < dst->inuse; ++i) {
@@ -201,6 +207,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 "walked_records:%"PRIu64" "
                 "walked_bytes:%"PRIu64" "
                 "walked_wire_bytes:%"PRIu64" "
+                "filtered_out_records %"PRIu64" "
+                "filtered_out_bytes %"PRIu64" "
+                "filtered_out_wire_bytes %"PRIu64" "
                 "dropped_records:%"PRIu64" "
                 "truncated_records %"PRIu64"\n",
                 (int)now.tv_sec,
@@ -209,6 +218,9 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                 dst->stats.walked_records,
                 dst->stats.walked_bytes,
                 dst->stats.walked_wbytes,
+                dst->stats.filtered_out.tx_records,
+                dst->stats.filtered_out.tx_bytes,
+                dst->stats.filtered_out.tx_wbytes,
                 dst->stats.dropped_records,
                 dst->stats.truncated_records);
         for (i = 0; i < dst->inuse; ++i) {

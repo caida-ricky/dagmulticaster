@@ -126,7 +126,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
         if (filter) {
             color = apply_darkfilter(filter, bottom);
             if (color < 0) {
-                fprintf(stderr, "Error applying darknet filter to received traffic.\n");
+                fprintf(stderr, "Error applying darknet filter to received "
+                        "traffic.\n");
                 halt_program();
                 return bottom;
             }
@@ -140,6 +141,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
                 dst->stats.walked_records++;
                 dst->stats.walked_bytes += len;
                 dst->stats.walked_wbytes += wlen;
+                dst->stats.filtered_out.tx_records++;
+                dst->stats.filtered_out.tx_bytes += len;
+                dst->stats.filtered_out.tx_wbytes += wlen;
 
                 /* Close running iovecs. */
                 for (i = 0; i < dst->inuse; ++i) {
