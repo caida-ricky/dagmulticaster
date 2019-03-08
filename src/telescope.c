@@ -496,7 +496,7 @@ int main(int argc, char **argv) {
         goto finalcleanup;
     }
 
-    // TODO: needs to be an array of things, not just one.
+    /* Fill in global parameters. */
     params.dagdevname = glob->dagdev;
     params.dagfd = dagfd;
     params.statinterval = glob->statinterval;
