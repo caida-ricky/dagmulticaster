@@ -326,7 +326,7 @@ static void *per_dagstream(void *threaddata) {
     dst->inuse = initialized;
 
     dag_stream_loop(dst, state, telescope_walk_records);
-    for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
+    for (i = 0; i < dst->params.sinkcnt; ++i) {
         ndag_destroy_encap(&state[i]);
     }
 
