@@ -83,7 +83,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
     uint32_t walked = 0;
     uint32_t wwalked = 0;
     int i;
-    int color = 0;
+    int color = 1;
     int non_default_open = 0; // Track if previous packet had a non-default sink.
 
     /* Sanity check. */
