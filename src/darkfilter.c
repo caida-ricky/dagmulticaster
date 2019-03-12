@@ -97,6 +97,7 @@ static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_fil
             } else if (exclude[idx] == 1) {
                 /* Replace default route. */
                 exclude[idx] = filter_file->color;
+                ++cnt;
             } else {
                 /* Or do we only want to count filters that apply the same color? */
                 if (exclude[idx] > 1) {
@@ -145,12 +146,12 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
     filter->files = files;
     filter->darknet = first_octet << 24;
 
-    for (i=0; i<2; i++) {
+    for (i = 0; i < 2; ++i) {
         if ((filter->exclude[i] =
              calloc(EXCLUDE_LEN, sizeof(color_t))) == NULL) {
             goto err;
         }
-        /* Initialize to default rout 1.  */
+        /* Initialize to default route 1.  */
         for (j = 0; j < EXCLUDE_LEN; ++j) {
             filter->exclude[i][j] = 1;
         }
