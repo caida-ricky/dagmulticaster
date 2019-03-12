@@ -300,9 +300,6 @@ static void *per_dagstream(void *threaddata) {
         goto perdagstreamexit;
     }
 
-    /* Initialize iov data. */
-    memset(dst->iovs, 0, sizeof(dst->iovs));
-
     /* Initialize dagstream thread.*/
     if (init_dag_stream(dst) == -1) {
         goto perdagstreamexit;
