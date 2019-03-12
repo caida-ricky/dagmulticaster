@@ -152,7 +152,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
 
         /* The default case should be fast. Lot's of indirections here. */
         if (color == 1) {
-            i = leading_zeros(0); // Should be 0.
+            i = leading_zeros(color); // Should be 0.
             if (collected[i] > 0 && collected[i] + len > dst->iovs[i].maxsize) {
                 /* Current record would push us over the end of our datagram */
                 break;
