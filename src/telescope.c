@@ -33,19 +33,14 @@ static volatile sig_atomic_t reload = 0;
 static pthread_t darkfilter_tid;
 
 static int leading_zeros(uint8_t color) {
-    /* We use this to map colors to an array position. Having no bit set counts
-     * as all bits as zeros, for out 8 bit value that's positon 8. */
-    if (color == 0) {
-        return sizeof(color) * 8;
-    }
-
-    /* Count by hand. There may be compiler intrinsics for this, but I'm not
-     * sure how they compare speed-wise and at what point they pay off. */
-    int cnt = 0;
-    while (color >> cnt != 0) {
-        ++cnt;
-    }
-    return cnt;
+  assert(color > 0);
+  int cnt = 0;
+  /* Count by hand. There may be compiler intrinsics for this, but I'm not
+   * sure how they compare speed-wise and at what point they pay off. */
+  while (((color >> cnt) & 1) == 0) {
+    ++cnt;
+  }
+  return cnt;
 }
 
 static void reload_signal(int signal) {
