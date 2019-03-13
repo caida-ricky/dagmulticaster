@@ -343,6 +343,7 @@ perdagstreamexit:
     for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
         if (dst->iovs[i].vec != NULL) {
             free(dst->iovs[i].vec);
+            dst->iovs[i].vec = NULL;
             dst->iovs[i].len = 0;
         }
     }

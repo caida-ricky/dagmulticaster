@@ -462,6 +462,7 @@ static void dst_destroy(dagstreamthread_t *dst,
     for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
         if (dst->iovs[i].vec != NULL) {
             free(dst->iovs[i].vec);
+            dst->iovs[i].vec = NULL;
             dst->iovs[i].len = 0;
         }
     }
@@ -549,6 +550,7 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         }
         dst->params.streamnum = i * 2;
         dst->streamstarted = 0;
+        dst->threadstarted = 0;
         memset(&dst->stats, 0, sizeof(streamstats_t));
 
 
