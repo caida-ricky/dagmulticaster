@@ -225,7 +225,6 @@ stopwalking:
             break;
         }
     }
-
     return bottom;
 }
 

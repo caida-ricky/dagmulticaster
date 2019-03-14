@@ -109,6 +109,17 @@ int init_dag_stream(dagstreamthread_t *dst) {
     poll.tv_sec = 0;
     poll.tv_usec = DAG_POLL_FREQ;
 
+    if (dag_attach_stream64(dst->params.dagfd,
+            dst->params.streamnum, 0, 8 * 1024 * 1024) != 0) {
+        if (errno == ENOMEM) {
+            return 0;
+        }
+
+        fprintf(stderr, "Failed to attach to DAG stream %d: %s\n",
+                dst->params.streamnum, strerror(errno));
+        return -1;
+    }
+
     if (dag_set_stream_poll64(dst->params.dagfd, dst->params.streamnum,
             mindata, &maxwait, &poll) != 0) {
         fprintf(stderr, "Failed to set polling parameters for DAG stream %d: %s\n",
@@ -402,8 +413,9 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
     /* Attach to a stream */
     if (dag_attach_stream64(nextslot->params.dagfd,
             nextslot->params.streamnum, 0, 8 * 1024 * 1024) != 0) {
-        if (errno == ENOMEM)
+        if (errno == ENOMEM) {
             return 0;
+        }
 
         fprintf(stderr, "Failed to attach to DAG stream %d: %s\n",
                 nextslot->params.streamnum, strerror(errno));
@@ -418,6 +430,8 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
         dag_detach_stream(nextslot->params.dagfd, nextslot->params.streamnum);
         return 0;
     }
+
+    dag_detach_stream(nextslot->params.dagfd, nextslot->params.streamnum);
     nextdagcpu = get_next_thread_cpu(nextslot->params.dagdevname, cpumap,
             nextslot->params.streamnum);
     if (nextdagcpu == -1) {
@@ -428,7 +442,6 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
                 "Not enough CPUs for the number of threads requested?\n");
         return -1;
     }
-
 
 #ifdef __linux__
 
@@ -648,7 +661,6 @@ halteverything:
         free(beacons);
     }
     fprintf(stderr, "All DAG streams have been halted.\n");
-
     free(cpumap);
     return errorstate;
 }
