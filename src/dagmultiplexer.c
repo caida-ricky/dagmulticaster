@@ -466,6 +466,10 @@ static void dst_destroy(dagstreamthread_t *dst,
             dst->iovs[i].len = 0;
         }
     }
+    if (dst->params.sinks != NULL) {
+        free(dst->params.sinks);
+        dst->params.sinkcnt = 0;
+    }
     if (destroyfunc) {
         destroyfunc(dst->extra);
     }
@@ -538,14 +542,18 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         }
 
         dst->params = *sparams;
+        dst->params.sinks =
+            (streamsink_t *) malloc(sizeof(streamsink_t) * dst->params.sinkcnt);
+        memcpy(dst->params.sinks, sparams->sinks,
+                sizeof(streamsink_t) * dst->params.sinkcnt);
         for (j = 0; j < DAG_COLOR_SLOTS; ++j) {
             dst->iovs[j].vec = (struct iovec *) malloc(sizeof(struct iovec) * 2);
             dst->iovs[j].len = 2;
         }
         dst->idletime = 0;
         for (j = 0; j < dst->params.sinkcnt; ++j) {
-            dst->params.sinks[j].exportport =
-                filteroffset * j + firstport + (i * DAG_MULTIPLEX_PORT_INCR);
+            dst->params.sinks[j].exportport = firstport + (j * filteroffset)
+                + (threadcount * DAG_MULTIPLEX_PORT_INCR);
             assert(dst->params.sinks[j].exportport <= 65534);
         }
         dst->params.streamnum = i * 2;
