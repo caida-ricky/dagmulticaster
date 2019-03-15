@@ -84,6 +84,7 @@ typedef struct dsthread {
     streamstats_t stats;
     pthread_t tid;
     int threadstarted;
+    pthread_mutex_t *dagmutex;
 
     /* One entry for each color. */
     iov_data_t iovs[DAG_COLOR_SLOTS];

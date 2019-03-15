@@ -109,14 +109,17 @@ int init_dag_stream(dagstreamthread_t *dst) {
     poll.tv_sec = 0;
     poll.tv_usec = DAG_POLL_FREQ;
 
+    pthread_mutex_lock(dst->dagmutex);
     if (dag_attach_stream64(dst->params.dagfd,
             dst->params.streamnum, 0, 8 * 1024 * 1024) != 0) {
         if (errno == ENOMEM) {
+            pthread_mutex_unlock(dst->dagmutex);
             return 0;
         }
 
         fprintf(stderr, "Failed to attach to DAG stream %d: %s\n",
                 dst->params.streamnum, strerror(errno));
+        pthread_mutex_unlock(dst->dagmutex);
         return -1;
     }
 
@@ -124,6 +127,7 @@ int init_dag_stream(dagstreamthread_t *dst) {
             mindata, &maxwait, &poll) != 0) {
         fprintf(stderr, "Failed to set polling parameters for DAG stream %d: %s\n",
                 dst->params.streamnum, strerror(errno));
+        pthread_mutex_unlock(dst->dagmutex);
         return -1;
     }
 
@@ -131,9 +135,11 @@ int init_dag_stream(dagstreamthread_t *dst) {
     if (dag_start_stream(dst->params.dagfd, dst->params.streamnum) != 0) {
         fprintf(stderr, "Failed to start DAG stream %d: %s\n",
                 dst->params.streamnum, strerror(errno));
+        pthread_mutex_unlock(dst->dagmutex);
         return -1;
     }
 
+    pthread_mutex_unlock(dst->dagmutex);
     dst->streamstarted = 1;
     return 0;
 }
@@ -410,15 +416,18 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
     //int i;
 #endif
 
+    pthread_mutex_lock(nextslot->dagmutex);
     /* Attach to a stream */
     if (dag_attach_stream64(nextslot->params.dagfd,
             nextslot->params.streamnum, 0, 8 * 1024 * 1024) != 0) {
         if (errno == ENOMEM) {
+            pthread_mutex_unlock(nextslot->dagmutex);
             return 0;
         }
 
         fprintf(stderr, "Failed to attach to DAG stream %d: %s\n",
                 nextslot->params.streamnum, strerror(errno));
+        pthread_mutex_unlock(nextslot->dagmutex);
         return -1;
     }
 
@@ -428,12 +437,14 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
     if (dag_get_stream_buffer_size64(nextslot->params.dagfd,
             nextslot->params.streamnum) <= 0) {
         dag_detach_stream(nextslot->params.dagfd, nextslot->params.streamnum);
+        pthread_mutex_unlock(nextslot->dagmutex);
         return 0;
     }
 
     dag_detach_stream(nextslot->params.dagfd, nextslot->params.streamnum);
     nextdagcpu = get_next_thread_cpu(nextslot->params.dagdevname, cpumap,
             nextslot->params.streamnum);
+    pthread_mutex_unlock(nextslot->dagmutex);
     if (nextdagcpu == -1) {
         /* TODO better error handling */
         /* TODO allow users to decide that they want more than one stream per
@@ -504,7 +515,10 @@ int run_dag_streams(int dagfd, uint16_t firstport,
     int filteroffset = 0;
     beaconthread_t *beacons = NULL;
     uint8_t *cpumap = NULL;
+    pthread_mutex_t dagmutex;
 
+
+    pthread_mutex_init(&dagmutex, NULL);
     cpumap = (uint8_t *)malloc(sizeof(uint8_t) * get_nb_cores());
     memset(cpumap, 0, sizeof(uint8_t) * get_nb_cores());
 
@@ -573,7 +587,7 @@ int run_dag_streams(int dagfd, uint16_t firstport,
         dst->streamstarted = 0;
         dst->threadstarted = 0;
         memset(&dst->stats, 0, sizeof(streamstats_t));
-
+        dst->dagmutex = &dagmutex;
 
         ret = start_dag_thread(dst, cpumap, processfunc);
 
@@ -662,6 +676,7 @@ halteverything:
     }
     fprintf(stderr, "All DAG streams have been halted.\n");
     free(cpumap);
+    pthread_mutex_destroy(&dagmutex);
     return errorstate;
 }
 
