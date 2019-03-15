@@ -13,24 +13,24 @@ typedef struct darkfilter_file {
 } darkfilter_file_t;
 
 typedef struct filter {
-    int filecnt;
-    darkfilter_file_t *files;
+  int filecnt;
+  darkfilter_file_t *files;
 
-    uint32_t darknet;
+  uint32_t darknet;
 
-    color_t *exclude[2];
-    volatile sig_atomic_t current_exclude;
+  color_t *exclude[2];
+  volatile sig_atomic_t current_exclude;
 
 } darkfilter_filter_t;
 
 typedef struct darkfilter {
-    darkfilter_filter_t *filter; // shared filter state
-    libtrace_t *dummytrace;
-    libtrace_packet_t *packet;
+  darkfilter_filter_t *filter; // shared filter state
+  libtrace_t *dummytrace;
+  libtrace_packet_t *packet;
 } darkfilter_t;
 
 darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
-        darkfilter_file_t* files);
+                                              darkfilter_file_t *files);
 void destroy_darkfilter_filter(darkfilter_filter_t *filter);
 int update_darkfilter_exclusions(darkfilter_filter_t *filter);
 

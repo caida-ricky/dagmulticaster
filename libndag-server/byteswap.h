@@ -3,7 +3,7 @@
 #include <arpa/inet.h>
 #include <inttypes.h>
 
-#ifdef __cplusplus 
+#ifdef __cplusplus
 extern "C" {
 #endif
 
@@ -30,7 +30,6 @@ uint32_t byteswap32(uint32_t num);
  *
  */
 uint16_t byteswap16(uint16_t num);
-
 
 #if __BYTE_ORDER == __BIG_ENDIAN
 #define bswap_host_to_be64(num) ((uint64_t)(num))
@@ -69,7 +68,7 @@ uint16_t byteswap16(uint16_t num);
 #error "Unknown byte order"
 #endif
 
-#ifdef __cplusplus 
+#ifdef __cplusplus
 }
 #endif
 
