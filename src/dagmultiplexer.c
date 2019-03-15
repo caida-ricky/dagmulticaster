@@ -480,19 +480,18 @@ static int start_dag_thread(dagstreamthread_t *nextslot,
 static void dst_destroy(dagstreamthread_t *dst,
                         void (*destroyfunc)(void *)) {
     int i;
-    if (!dst->threadstarted) {
-        return;
+
+    if (dst->params.sinks != NULL) {
+        free(dst->params.sinks);
+        dst->params.sinkcnt = 0;
     }
+
     for (i = 0; i < DAG_COLOR_SLOTS; ++i) {
         if (dst->iovs[i].vec != NULL) {
             free(dst->iovs[i].vec);
             dst->iovs[i].vec = NULL;
             dst->iovs[i].len = 0;
         }
-    }
-    if (dst->params.sinks != NULL) {
-        free(dst->params.sinks);
-        dst->params.sinkcnt = 0;
     }
     if (destroyfunc) {
         destroyfunc(dst->extra);
