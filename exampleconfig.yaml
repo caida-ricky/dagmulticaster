@@ -29,6 +29,7 @@ outputs:
     mtu: 8961
     filterfile: /path/to/filter2
     monitorid: 45
+    exclude: false
   -
     name: default
     mcastaddr: zz.zz.zz.zz

@@ -5,6 +5,19 @@
 
 #include "telescope.h"
 
+static int parse_onoff_option(char *value, uint8_t *opt) {
+    if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
+            strcmp(value, "on") == 0 || strcmp(value, "enabled") == 0) {
+        *opt = 1;
+    } else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
+            strcmp(value, "off") == 0 || strcmp(value, "disabled") == 0) {
+        *opt = 0;
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
 static int parse_torrents(telescope_global_t *glob,
         yaml_document_t *doc, yaml_node_t *torrentlist) {
 
@@ -58,6 +71,7 @@ static int parse_torrents(telescope_global_t *glob,
         new->monitorid = 0;
         new->next = NULL;
         new->name = NULL;
+        new->exclude = 1; // true
 
         /* Make sure save the list in the global state. */
         if (glob->torrents == NULL) {
@@ -111,12 +125,22 @@ static int parse_torrents(telescope_global_t *glob,
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "filterfile")) {
-                current->filterfile= strdup((char *)value->data.scalar.value);
+                current->filterfile = strdup((char *)value->data.scalar.value);
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "name")) {
-                current->name= strdup((char *)value->data.scalar.value);
+                current->name = strdup((char *)value->data.scalar.value);
+            }
+
+            else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                         && !strcmp((char *)key->data.scalar.value, "exclude")) {
+                if (parse_onoff_option((char *)value->data.scalar.value,
+                                       &current->exclude) != 0) {
+                    fprintf(stderr, "Not a viable option 'exclude': %s.\n",
+                        (char *)value->data.scalar.value);
+                    goto torrentparseerror;
+                }
             }
         }
 
@@ -127,7 +151,7 @@ static int parse_torrents(telescope_global_t *glob,
             }
 
             if (current->srcaddr == NULL) {
-                fprintf(stderr," Warning: no source address specified. Using "
+                fprintf(stderr, "Warning: no source address specified. Using "
                     "default interface.\n");
                 current->srcaddr = strdup("0.0.0.0");
             }
