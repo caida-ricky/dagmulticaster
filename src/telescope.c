@@ -150,7 +150,7 @@ static char * walk_stream_buffer(char *bottom, char *top,
             }
         }
 
-        /* The default case should be fast. Lot's of indirections here. */
+        /* The default case should be fast. Lot's of loops otherwise. */
         if (color == 1) {
             i = leading_zeros(color); // Should be 0.
             if (collected[i] > 0 && collected[i] + len > dst->iovs[i].maxsize) {
@@ -171,16 +171,19 @@ static char * walk_stream_buffer(char *bottom, char *top,
             }
             non_default_open = 0;
         } else {
-            /* Sadly we have to figure this out before we do anything else.
+            /* We have to check the default here as well since it might overlap
+             * with other colors.*/
+
+            /* Sadly we have to check the size before we do anything else.
              * Otherwise we risk appending a packet to the same sink twice.*/
-            for (i = 1; i < dst->inuse; ++i) {
+            for (i = 0; i < dst->inuse; ++i) {
                 if (IS_SET(color, i) && collected[i] > 0
                         && collected[i] + len > dst->iovs[i].maxsize) {
                     goto stopwalking;
                 }
             }
 
-            /* Iterate over all colors, need to close default if it was open. */
+            /* Append to matching colors, end open iovs. */
             for (i = 0; i < dst->inuse; ++i) {
                 if (IS_SET(color, i)) {
                     tx[i] += len;
