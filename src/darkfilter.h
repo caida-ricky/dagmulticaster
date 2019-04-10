@@ -10,7 +10,7 @@
 typedef struct darkfilter_file {
   color_t color;
   char *excl_file;
-  int exclude; // bool
+  uint8_t exclude; // bool
 } darkfilter_file_t;
 
 typedef struct filter {

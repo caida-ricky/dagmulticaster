@@ -25,8 +25,7 @@
 
 #define CURRENT_EXCLUDE(filter) ((filter)->exclude[(filter)->current_exclude])
 
-static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file,
-                           const int exclude_from_default) {
+static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -95,14 +94,14 @@ static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_fil
                 fprintf(stderr, "[darkfilter] Cannot send packet marked as "
                     "dropped to another sink.\n");
                 goto err;
-            } else if (exclude[idx] & 1 != 0) {
+            } else if ((exclude[idx] & 1) != 0) {
                 /* Check if the /24 should be exluded from the default sink. */
-                if (exclude_from_default) {
+                if (filter_file->exclude) {
                     if (exclude[idx] > 1) {
                         /* Another filter disagrees. */
                         fprintf(stderr, "[darkfilter] Overlapping filters don't "
                             " agree if a /24 should be excluded from the default "
-                            " sink".\n");
+                            " sink.\n");
                         goto err;
                     }
                     /* Exclude traffic from default route. */
@@ -173,8 +172,7 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
     filter->current_exclude = 0;
 
     for (i = 0; i < cnt; ++i) {
-        if (parse_excl_file(CURRENT_EXCLUDE(filter),
-                &filter->files[i], filter->exclude) != 0) {
+        if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
           goto err;
         }
     }
@@ -206,8 +204,7 @@ int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
         excl[i] = 1;
     }
     for (i = 0; i < filter->filecnt; ++i) {
-        if (parse_excl_file(excl, &filter->files[i],
-                filter->exclude) != 0) {
+        if (parse_excl_file(excl, &filter->files[i]) != 0) {
             return -1;
         }
     }
