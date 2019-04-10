@@ -561,6 +561,7 @@ int main(int argc, char **argv) {
             /* Data to build the filter from exclusion files. */
             darkfilterfiles[fileindex].color = itr->color;
             darkfilterfiles[fileindex].excl_file = itr->filterfile;
+            darkfilterfiles[fileindex].exclude = itr->exclude;
             itr->filterfile = NULL; // Transfer ownership.
             /* Got one.*/
             fileindex += 1;

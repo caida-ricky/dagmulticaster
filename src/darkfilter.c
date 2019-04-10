@@ -25,7 +25,8 @@
 
 #define CURRENT_EXCLUDE(filter) ((filter)->exclude[(filter)->current_exclude])
 
-static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file) {
+static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file,
+                           const int exclude_from_default) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -90,17 +91,30 @@ static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_fil
             if ((exclude[idx] == 0 && filter_file->color != 1) ||
                     (exclude[idx] > 1 && filter_file->color == 0)) {
                 /* An entry already registered to be dropped is assigned another
-                 * color or an already colored entry is assigned to be drop.*/
+                 * color or an already colored entry is assigned to be dropped. */
                 fprintf(stderr, "[darkfilter] Cannot send packet marked as "
                     "dropped to another sink.\n");
                 goto err;
-            } else if (exclude[idx] == 1) {
-                /* Replace default route. */
-                exclude[idx] = filter_file->color;
+            } else if (exclude[idx] & 1 != 0) {
+                /* Check if the /24 should be exluded from the default sink. */
+                if (exclude_from_default) {
+                    if (exclude[idx] > 1) {
+                        /* Another filter disagrees. */
+                        fprintf(stderr, "[darkfilter] Overlapping filters don't "
+                            " agree if a /24 should be excluded from the default "
+                            " sink".\n");
+                        goto err;
+                    }
+                    /* Exclude traffic from default route. */
+                    exclude[idx] = filter_file->color;
+                } else {
+                    /* Share traffic with default route.  */
+                    exclude[idx] |= filter_file->color;
+                }
                 ++cnt;
             } else {
-                /* Or do we only want to count filters that apply the same color? */
                 if (exclude[idx] > 1) {
+                    /* Or do we only want to count filters that apply the same color? */
                     ++overlaps;
                 } else {
                     ++cnt;
@@ -159,7 +173,8 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
     filter->current_exclude = 0;
 
     for (i = 0; i < cnt; ++i) {
-        if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
+        if (parse_excl_file(CURRENT_EXCLUDE(filter),
+                &filter->files[i], filter->exclude) != 0) {
           goto err;
         }
     }
@@ -191,7 +206,8 @@ int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
         excl[i] = 1;
     }
     for (i = 0; i < filter->filecnt; ++i) {
-        if (parse_excl_file(excl, &filter->files[i]) != 0) {
+        if (parse_excl_file(excl, &filter->files[i],
+                filter->exclude) != 0) {
             return -1;
         }
     }
