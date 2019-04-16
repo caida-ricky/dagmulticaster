@@ -182,9 +182,19 @@ static int parse_torrents(telescope_global_t *glob,
         } else if (current->filterfile != NULL && current->mcastaddr == NULL) {
             current->color = 0x0;
             ++nostreamcount;
+            if (current->exclude == 0) {
+                fprintf(stderr,
+                    "WARNING: Filters that drop packets must be excluded from "
+                    "the default sink, enabling flag.\n");
+                current->exclude = 1;
+            }
         } else if (current->filterfile == NULL && current->mcastaddr != NULL) {
             current->color = 0x1;
             ++nofiltercount;
+            if (current->exclude == 0) {
+                fprintf(stderr,
+                    "WARNING: Exclude flag has no effect on the default sink.\n");
+            }
         } else {
             /* Both NULL. */
             fprintf(stderr,
