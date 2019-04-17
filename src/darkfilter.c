@@ -25,53 +25,7 @@
 
 #define CURRENT_EXCLUDE(filter) ((filter)->exclude[(filter)->current_exclude])
 
-/* TODO port to libwandio?? */
-static off_t wandio_fgets(io_t *file, void *buffer, off_t len, int chomp)
-{
-    char cbuf;
-    int rval;
-    int i;
-    int done = 0;
-
-    if (file == NULL) {
-        return 0;
-    }
-
-    if(buffer == NULL || len <= 0)
-    {
-        return 0;
-    }
-
-    for(i=0; !done && i < len-1; i++)
-    {
-        if((rval = wandio_read(file, &cbuf, 1)) < 0)
-        {
-            return rval;
-        }
-        if(rval == 0)
-        {
-            done = 1;
-            i--;
-        }
-        else
-        {
-            ((char*)buffer)[i] = cbuf;
-            if(cbuf == '\n')
-            {
-                if(chomp != 0)
-                {
-                    ((char*)buffer)[i] = '\0';
-                }
-                done = 1;
-            }
-        }
-    }
-
-    ((char*)buffer)[i] = '\0';
-    return i;
-}
-
-static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
+static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_file) {
     io_t *file;
     char buf[1024];
     char *mask_str;
@@ -91,13 +45,13 @@ static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
     int overlaps = 0;
     int idx;
 
-    if ((file = wandio_create(excl_file)) == NULL) {
-        fprintf(stderr, "Failed to open exclusion file %s\n", excl_file);
+    if ((file = wandio_create(filter_file->excl_file)) == NULL) {
+        fprintf(stderr, "Failed to open exclusion file %s\n", filter_file->excl_file);
         return -1;
     }
 
     while (wandio_fgets(file, buf, 1024, 1) != 0) {
-        // split the line to get ip and len
+        /* Split the line to get ip and len. */
         if ((mask_str = strchr(buf, '/')) == NULL) {
             fprintf(stderr, "ERROR: Malformed prefix for darkfilter: %s\n",
                     buf);
@@ -106,7 +60,7 @@ static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
         *mask_str = '\0';
         mask_str++;
 
-        // convert the ip and mask to a number
+        /* Convert the ip and mask to a number. */
         addr = inet_addr(buf);
         addr = ntohl(addr);
         mask = atoi(mask_str);
@@ -120,27 +74,57 @@ static int parse_excl_file(uint8_t *exclude, const char *excl_file) {
                   buf, mask_str);
           continue;
         }
-        // compute the /24s that this prefix covers
-        // perhaps not the most efficient way to do this, but i've borrowed it
-        // from other code that I'm sure actually works, and this only happens
-        // once at startup, so whatevs ;)
+
+        /* Compute the /24s that this prefix covers.
+         * Perhaps not the most efficient way to do this, but i've borrowed it
+         * from other code that I'm sure actually works, and this only happens
+         * once at startup, so whatevs. ;) */
         first_addr = addr & (~0 << (32-mask));
-        last_addr = first_addr + (1<<(32-mask))-1;
+        last_addr = first_addr + (1 << (32-mask)) - 1;
 
         first_slash24 = (first_addr/256)*256;
         last_slash24 = (last_addr/256)*256;
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
-            idx = (x&0x00FFFF00)>>8;
-            if (exclude[idx] == 0) {
-                exclude[idx] = 1;
-                cnt++;
+            idx = (x & 0x00FFFF00) >> 8;
+            if ((exclude[idx] == 0 && filter_file->color != 1) ||
+                    (exclude[idx] > 1 && filter_file->color == 0)) {
+                /* An entry already registered to be dropped is assigned another
+                 * color or an already colored entry is assigned to be dropped. */
+                fprintf(stderr, "[darkfilter] Cannot send packet marked as "
+                    "dropped to another sink.\n");
+                goto err;
+            } else if ((exclude[idx] & 1) != 0) {
+                /* Check if the /24 should be exluded from the default sink. */
+                if (filter_file->exclude) {
+                    if (exclude[idx] > 1) {
+                        /* Another filter disagrees. */
+                        fprintf(stderr, "[darkfilter] Overlapping filters don't "
+                            " agree if a /24 should be excluded from the default "
+                            " sink.\n");
+                        goto err;
+                    }
+                    /* Exclude traffic from default route. */
+                    exclude[idx] = filter_file->color;
+                } else {
+                    /* Share traffic with default route.  */
+                    exclude[idx] |= filter_file->color;
+                }
+                ++cnt;
             } else {
-                overlaps++;
+                if (exclude[idx] > 1) {
+                    /* Or do we only want to count filters that apply the same color? */
+                    ++overlaps;
+                } else {
+                    ++cnt;
+                }
+                /* Stack potential colors. */
+                exclude[idx] |= filter_file->color;
             }
         }
     }
 
+    fprintf(stderr, "[darkfilter] INFO: Filter %s\n", filter_file->excl_file);
     fprintf(stderr, "[darkfilter] INFO: Excluding %d /24s\n", cnt);
     fprintf(stderr, "[darkfilter] INFO: Overlaps %d /24s\n", overlaps);
 
@@ -153,9 +137,10 @@ err:
     return -1;
 }
 
-darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) {
+darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
+                                              darkfilter_file_t* files) {
     darkfilter_filter_t *filter;
-    int i;
+    int i, j;
 
     filter = malloc(sizeof(darkfilter_filter_t));
     if (!filter) {
@@ -170,19 +155,26 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, char *excl_file) 
         goto err;
     }
 
-    filter->excl_file = excl_file;
+    filter->filecnt = cnt;
+    filter->files = files;
     filter->darknet = first_octet << 24;
 
-    for (i=0; i<2; i++) {
+    for (i = 0; i < 2; ++i) {
         if ((filter->exclude[i] =
-             calloc(EXCLUDE_LEN, sizeof(uint8_t))) == NULL) {
+             calloc(EXCLUDE_LEN, sizeof(color_t))) == NULL) {
             goto err;
+        }
+        /* Initialize to default route 1.  */
+        for (j = 0; j < EXCLUDE_LEN; ++j) {
+            filter->exclude[i][j] = 1;
         }
     }
     filter->current_exclude = 0;
 
-    if (parse_excl_file(CURRENT_EXCLUDE(filter), filter->excl_file) != 0) {
-      goto err;
+    for (i = 0; i < cnt; ++i) {
+        if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
+          goto err;
+        }
     }
 
     return filter;
@@ -205,25 +197,26 @@ void destroy_darkfilter_filter(darkfilter_filter_t *filter) {
 }
 
 int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
-    uint8_t *excl = filter->exclude[!filter->current_exclude];
-    memset(excl, 0, EXCLUDE_LEN);
-    if (parse_excl_file(excl, filter->excl_file) != 0) {
-        return -1;
+    int i;
+    color_t *excl = filter->exclude[!filter->current_exclude];
+    /* 1 signifies forwarding to the default route.  */
+    for (i = 0; i < EXCLUDE_LEN; ++i) {
+        excl[i] = 1;
+    }
+    for (i = 0; i < filter->filecnt; ++i) {
+        if (parse_excl_file(excl, &filter->files[i]) != 0) {
+            return -1;
+        }
     }
     filter->current_exclude = !filter->current_exclude;
     return 0;
 }
 
 int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
-    /* Return 1 if packet should NOT be discarded, i.e. it doesn't match
-     * any of our exclusion /24s */
-
-    /* Return 0 to exclude the packet. */
-
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
 
-    /* prepare a libtrace packet */
+    /* Prepare a libtrace packet. */
     if (trace_prepare_packet(state->dummytrace, state->packet, pktbuf,
                              TRACE_RT_DATA_ERF,
                              TRACE_PREP_DO_NOT_OWN_BUFFER) == -1) {
@@ -232,21 +225,24 @@ int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
         return -1;
     }
 
-    /* check for ipv4 */
+    /* Check for IPv4. */
     if((ip_hdr = trace_get_ip(state->packet)) == NULL) {
-        /* not an ip packet */
         goto skip;
     }
+
+    /* Extract destination address. */
     ip_addr = htonl(ip_hdr->ip_dst.s_addr);
 
-    if(((ip_addr & 0xFF000000) != state->filter->darknet) ||
-       (CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
+    /* Check if prefix matches the darknet. */
+    if((ip_addr & 0xFF000000) != state->filter->darknet) {
         goto skip;
     }
 
-    return 1;
+    /* Return matching color(s). */
+    return (int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8];
 
 skip:
+    /* Color 0 will drop the packet, see telescope.h. */
     return 0;
 }
 
