@@ -45,6 +45,9 @@ static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_fil
     int overlaps = 0;
     int idx;
 
+    // "default" filter cannot have a filter file
+    assert(filter_file->color != 1);
+
     if ((file = wandio_create(filter_file->excl_file)) == NULL) {
         fprintf(stderr, "Failed to open exclusion file %s\n", filter_file->excl_file);
         return -1;
@@ -87,7 +90,7 @@ static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_fil
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
             idx = (x & 0x00FFFF00) >> 8;
-            if ((exclude[idx] == 0 && filter_file->color != 1) ||
+            if ((exclude[idx] == 0 && filter_file->color != 0) ||
                     (exclude[idx] > 1 && filter_file->color == 0)) {
                 /* An entry already registered to be dropped is assigned another
                  * color or an already colored entry is assigned to be dropped. */
