@@ -220,6 +220,7 @@ static int parse_torrents(telescope_global_t *glob,
 
     /* Move default route to the front of the list. */
     new = glob->torrents;
+    current = NULL;
     /* Find entry. */
     while (new->color != 1) {
         /* We checked above that the default sink exists. */
@@ -227,10 +228,12 @@ static int parse_torrents(telescope_global_t *glob,
         current = new;
         new = new->next;
     }
-    /* Move it. */
-    current->next = new->next;
-    new->next = glob->torrents;
-    glob->torrents = new;
+    if (current != NULL) {
+      /* Move it. */
+      current->next = new->next;
+      new->next = glob->torrents;
+      glob->torrents = new;
+    }
 
     glob->torrentcount = torrentcount;
     return torrentcount;
