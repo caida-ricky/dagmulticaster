@@ -91,39 +91,58 @@ static int parse_excl_file(color_t *exclude, const darkfilter_file_t *filter_fil
 
         for(x = first_slash24; x <= last_slash24; x += 256) {
             idx = (x & 0x00FFFF00) >> 8;
-            if ((exclude[idx] == 0 && filter_file->color != 0) ||
-                    (exclude[idx] > 1 && filter_file->color == 0)) {
-                /* An entry already registered to be dropped is assigned another
-                 * color or an already colored entry is assigned to be dropped. */
-                fprintf(stderr, "[darkfilter] Cannot send packet marked as "
-                    "dropped to another sink.\n");
-                goto err;
-            } else if ((exclude[idx] & 1) != 0) {
-                /* Check if the /24 should be exluded from the default sink. */
-                if (filter_file->exclude) {
-                    if (exclude[idx] > 1) {
-                        /* Another filter disagrees. */
-                        fprintf(stderr, "[darkfilter] Overlapping filters don't "
-                            " agree if a /24 should be excluded from the default "
-                            " sink.\n");
-                        goto err;
-                    }
-                    /* Exclude traffic from default route. */
-                    exclude[idx] = filter_file->color;
-                } else {
-                    /* Share traffic with default route.  */
-                    exclude[idx] |= filter_file->color;
-                }
-                ++cnt;
-            } else {
-                if (exclude[idx] > 1) {
-                    /* Or do we only want to count filters that apply the same color? */
+            if (exclude[idx] == 0 || filter_file->color == 0) {
+                /* /24 already marked as dropped or to be marked as dropped. */
+                if (exclude[idx] > 1 || filter_file->color != 0) {
+                    /* An entry already registered to be dropped is assigned
+                     * another color or an already colored entry is assigned
+                     * to be dropped. Since the drop filter might change at
+                     * any time we prioritize dropping as a tie-breaker. */
+                    fprintf(stderr, "[darkfilter] WARN: drop-filter overlapping"
+                            " with other filter, dropping wins.\n");
                     ++overlaps;
                 } else {
                     ++cnt;
                 }
-                /* Stack potential colors. */
+                exclude[idx] = 0;
+            } else if ((exclude[idx] & 1) != 0) {
+                /* /24 still goes to the default sink. */
+                if (exclude[idx] > 1) {
+                    /* Other color already added. */
+                    ++overlaps;
+                } else {
+                    /* First color to be added. */
+                    ++cnt;
+                }
+                /* Check this color excludes traffic from the default sink. */
+                if (filter_file->exclude) {
+                    if (exclude[idx] > 1) {
+                        /* Another filter was already added, but did not exclude
+                         * the default. Remove it. */
+                        fprintf(stderr, "[darkfilter] WARN: Overlapping filters "
+                            "don't agree if a /24 should be excluded from the "
+                            "default sink. Removing colors that mirror part of "
+                            "the default sink.\n");
+                    }
+                    exclude[idx] = 0;
+                }
+                /* Add this color. */
                 exclude[idx] |= filter_file->color;
+            } else {
+                /* /24 already excluded from default sink. */
+                assert(exclude[idx] > 1);
+                ++overlaps;
+                if (filter_file->exclude) {
+                    /* This color excludes traffic as well, add it. */
+                    exclude[idx] |= filter_file->color;
+                } else {
+                    /* This color mirrors traffic to the default, don't add it. */
+                    fprintf(stderr, "[darkfilter] WARN: Overlapping filters "
+                            "don't agree if a /24 should be excluded from the "
+                            "default sink. Not adding color because it mirrors "
+                            "part of the default sink.\n");
+                }
+                
             }
         }
     }
