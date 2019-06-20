@@ -37,7 +37,6 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
     char portstr[16];
     int sock;
     uint32_t ttl = 1;       /* TODO make this configurable */
-    uint32_t disable = 0;
     int bufsize;
 
     hints.ai_family = PF_UNSPEC;
@@ -93,6 +92,8 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
         goto sockcreateover;
     }
 
+#if 0
+    // AK disables to allow spitzer to consume its own stream
     if (setsockopt(sock,
             source->ai_family == PF_INET6 ? IPPROTO_IPV6: IPPROTO_IP,
             source->ai_family == PF_INET6 ? IPV6_MULTICAST_LOOP: IP_MULTICAST_LOOP,
@@ -104,6 +105,7 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
         sock = -1;
         goto sockcreateover;
     }
+#endif
 
     bufsize = 16 * 1024 * 1024;
     if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize,
