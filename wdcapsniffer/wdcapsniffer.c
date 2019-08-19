@@ -300,6 +300,7 @@ int main(int argc, char **argv) {
      */
 
     params.monitorid = 1;
+    params.statinterval = 0;
 
     /* This lets us do fast polling on the DAG card. Fast polls (< 2ms) will
      * be implemented as busy-waits so there will be high CPU usage.
