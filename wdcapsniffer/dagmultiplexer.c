@@ -238,7 +238,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         // should we log stats now?
         // TODO: consider checking the time every N iterations
         gettimeofday(&now, NULL);
-        if (now.tv_sec >= nextstat) {
+        if (nextstat > 0 && now.tv_sec >= nextstat) {
             log_stats(dst, now);
             nextstat += dst->params.statinterval;
         }
