@@ -411,6 +411,8 @@ int main(int argc, char **argv) {
     params.multicastgroup = multicastgroup;
     params.sourceaddr = sourceaddr;
     params.mtu = mtu;
+    params.statinterval = 0;
+    params.statdir = NULL;
 
     gettimeofday(&starttime, NULL);
     params.globalstart = bswap_host_to_be64(
