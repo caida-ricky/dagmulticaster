@@ -29,14 +29,14 @@ int ndag_interrupt_beacon(void) {
 }
 
 int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
-        char *srcaddr, struct addrinfo **targetinfo) {
+        char *srcaddr, struct addrinfo **targetinfo, uint8_t ttl) {
 
     struct addrinfo hints;
     struct addrinfo *gotten;
     struct addrinfo *source;
     char portstr[16];
     int sock;
-    uint32_t ttl = 1;       /* TODO make this configurable */
+    uint32_t ttlopt = ttl;
     int bufsize;
 
     hints.ai_family = PF_UNSPEC;
@@ -71,10 +71,10 @@ int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
             gotten->ai_family == PF_INET6 ? IPPROTO_IPV6: IPPROTO_IP,
             gotten->ai_family == PF_INET6 ? IPV6_MULTICAST_HOPS :
                     IP_MULTICAST_TTL,
-            (char *)&ttl, sizeof(ttl)) != 0) {
+            (char *)&ttlopt, sizeof(ttlopt)) != 0) {
         fprintf(stderr,
-                "nDAG: Failed to configure multicast TTL for %s:%s -- %s\n",
-                groupaddr, portstr, strerror(errno));
+                "nDAG: Failed to configure multicast TTL of %u for %s:%s -- %s\n",
+                ttlopt, groupaddr, portstr, strerror(errno));
         close(sock);
         sock = -1;
         goto sockcreateover;
@@ -353,7 +353,7 @@ void *ndag_start_beacon(void *params) {
     struct addrinfo *targetinfo = NULL;
 
     beacsock = ndag_create_multicaster_socket(nparams->beaconport,
-            nparams->groupaddr, nparams->srcaddr, &targetinfo);
+            nparams->groupaddr, nparams->srcaddr, &targetinfo, nparams->ttl);
 
     if (beacsock == -1) {
         fprintf(stderr,

@@ -71,6 +71,7 @@ static int parse_torrents(telescope_global_t *glob,
         new->monitorid = 0;
         new->next = NULL;
         new->name = NULL;
+        new->ttl = 1;
         new->exclude = 1; // true
 
         /* Make sure save the list in the global state. */
@@ -120,6 +121,13 @@ static int parse_torrents(telescope_global_t *glob,
                          && !strcmp((char *)key->data.scalar.value, "mtu")) {
                 current->mtu =
                     (uint16_t) strtoul((char *)value->data.scalar.value, NULL, 10);
+                needsdefaults = 1;
+            }
+
+            else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                         && !strcmp((char *)key->data.scalar.value, "ttl")) {
+                current->ttl =
+                    (uint8_t) strtoul((char *)value->data.scalar.value, NULL, 10);
                 needsdefaults = 1;
             }
 

@@ -550,12 +550,14 @@ int main(int argc, char **argv) {
             beaconparams[beaconindex].beaconport = itr->mcastport;
             beaconparams[beaconindex].frequency = DAG_MULTIPLEX_BEACON_FREQ;
             beaconparams[beaconindex].monitorid = itr->monitorid;
+            beaconparams[beaconindex].ttl = itr->ttl;
             /* Streamparameters to sort incoming packets into. */
             params.sinks[beaconindex].color = itr->color;
             params.sinks[beaconindex].sourceaddr = itr->srcaddr;
             params.sinks[beaconindex].multicastgroup = itr->mcastaddr;
             params.sinks[beaconindex].monitorid = itr->monitorid;
             params.sinks[beaconindex].mtu = itr->mtu;
+            params.sinks[beaconindex].ttl = itr->ttl;
             /* The config maintains ownership of the name. */
             params.sinks[beaconindex].name = itr->name;
             /* Got one.*/

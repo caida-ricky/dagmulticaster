@@ -25,6 +25,7 @@ typedef struct streamparams {
     uint16_t mtu;
     int statinterval;
     char *statdir;
+    uint8_t ttl;
 } streamparams_t;
 
 typedef struct streamstats {
