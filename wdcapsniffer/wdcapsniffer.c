@@ -301,6 +301,7 @@ int main(int argc, char **argv) {
 
     params.monitorid = 1;
     params.statinterval = 0;
+    params.ttl = 1;
 
     /* This lets us do fast polling on the DAG card. Fast polls (< 2ms) will
      * be implemented as busy-waits so there will be high CPU usage.
@@ -319,11 +320,12 @@ int main(int argc, char **argv) {
             { "groupaddr", 1, 0, 'a' },
             { "sourceaddr", 1, 0, 's' },
             { "mtu", 1, 0, 'M' },
+            { "ttl", 1, 0, 't' },
             { "wdcapconfig", 1, 0, 'w' },
             { NULL, 0, 0, 0 }
         };
 
-        c = getopt_long(argc, argv, "w:a:s:d:hm:M:p:", long_options,
+        c = getopt_long(argc, argv, "w:a:s:d:hm:M:p:t:", long_options,
                 &option_index);
         if (c == -1)
             break;
@@ -346,6 +348,9 @@ int main(int argc, char **argv) {
                 break;
             case 'M':
                 mtu = (uint16_t)(strtoul(optarg, NULL, 0) % 65536);
+                break;
+            case 't':
+                params.ttl = (uint8_t)(strtoul(optarg, NULL, 0) % 256);
                 break;
             case 'w':
                 wdcapconffile = optarg;
@@ -388,6 +393,10 @@ int main(int argc, char **argv) {
             "0 is not a valid monitor ID -- choose another number.\n");
         goto finalcleanup;
     }
+    if (params.ttl == 0) {
+        fprintf(stderr, "Warning: 0 is not a valid TTL, replacing with 1.\n");
+        params.ttl = 1;
+    }
 
     if (wdcapconffile != NULL) {
         wdcapconf = parseWdcapProcessingConfig(wdcapconffile);
@@ -411,6 +420,8 @@ int main(int argc, char **argv) {
     params.multicastgroup = multicastgroup;
     params.sourceaddr = sourceaddr;
     params.mtu = mtu;
+    params.statinterval = 0;
+    params.statdir = NULL;
 
     gettimeofday(&starttime, NULL);
     params.globalstart = bswap_host_to_be64(

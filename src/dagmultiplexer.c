@@ -151,7 +151,7 @@ int init_dag_sink(ndag_encap_params_t *state, streamsink_t *params, int streamnu
 
     /* Create an exporting socket. */
     sock = ndag_create_multicaster_socket(params->exportport,
-        params->multicastgroup, params->sourceaddr, &targetinfo);
+        params->multicastgroup, params->sourceaddr, &targetinfo, params->ttl);
     if (sock == -1) {
         fprintf(stderr, "Failed to create multicaster socket for DAG stream %d\n",
             streamnum);

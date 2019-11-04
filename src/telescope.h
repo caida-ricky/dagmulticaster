@@ -32,6 +32,7 @@ typedef struct torrent {
     uint16_t mcastport;
     uint16_t mtu;
     uint16_t monitorid;
+    uint8_t ttl;
     struct torrent *next;
     uint8_t exclude; // bool
 } torrent_t;
