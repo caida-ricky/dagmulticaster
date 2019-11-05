@@ -21,6 +21,7 @@ outputs:
     mtu: 8960
     filterfile: /path/to/filter1
     monitorid: 44
+    ttl: 4
   -
     name: sink-y
     mcastaddr: yy.yy.yy.yy
@@ -29,6 +30,7 @@ outputs:
     mtu: 8961
     filterfile: /path/to/filter2
     monitorid: 45
+    ttl: 2
     exclude: false
   -
     name: default
@@ -37,6 +39,7 @@ outputs:
     srcaddr: xx.yy.zz.aa
     mtu: 8962
     monitorid: 46
+    ttl: 2
     # ^ default
   -
     filterfile: /path/to/filter3

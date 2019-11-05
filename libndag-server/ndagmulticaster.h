@@ -31,6 +31,7 @@ typedef struct ndagbeaconparams {
     uint16_t *streamports;
     uint32_t frequency;
     uint16_t monitorid;
+    uint8_t  ttl;
 } ndag_beacon_params_t;
 
 typedef struct ndagencapparams {
@@ -85,7 +86,7 @@ typedef struct ndag_encap {
 int ndag_interrupt_beacon(void);
 void *ndag_start_beacon(void *params);
 int ndag_create_multicaster_socket(uint16_t port, char *groupaddr,
-        char *srcaddr, struct addrinfo **targetinfo);
+        char *srcaddr, struct addrinfo **targetinfo, uint8_t ttl);
 void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo);
 int ndag_send_keepalive(ndag_encap_params_t *params);
 

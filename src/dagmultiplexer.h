@@ -24,6 +24,7 @@ typedef struct streamsink {
     color_t color;
     uint16_t monitorid;
     uint16_t exportport;
+    uint8_t ttl;
     char *multicastgroup;
     char *sourceaddr;
     char *name; // non-owning reference, owned by config
@@ -106,19 +107,19 @@ typedef struct beaconthread {
 extern volatile int halted;
 extern volatile int paused;
 
-inline int is_paused(void) {
+static inline int is_paused(void) {
     return paused;
 }
 
-inline int is_halted(void) {
+static inline int is_halted(void) {
     return halted;
 }
 
-inline void halt_program(void) {
+static inline void halt_program(void) {
     halted = 1;
 }
 
-inline void pause_program(void) {
+static inline void pause_program(void) {
     if (paused) {
         paused = 0;
     } else {

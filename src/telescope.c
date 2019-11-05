@@ -413,6 +413,7 @@ int main(int argc, char **argv) {
     uint16_t firstport;
     struct timeval starttime;
     struct sigaction sigact;
+    torrent_t *itr;
 
     srand((unsigned) time(&t));
 
@@ -504,7 +505,7 @@ int main(int argc, char **argv) {
     firstport = 10000 + (rand() % 50000);
 
     /* We have to count since not all torrents require a beacon. */
-    for (torrent_t* itr = glob->torrents; itr != NULL; itr = itr->next) {
+    for (itr = glob->torrents; itr != NULL; itr = itr->next) {
         if (itr->mcastaddr != NULL) {
             ++beaconcnt;
         }
@@ -541,7 +542,7 @@ int main(int argc, char **argv) {
      * which will clean up the strings.*/
     beaconindex = 0;
     fileindex = 0;
-    for (torrent_t* itr = glob->torrents; itr != NULL; itr = itr->next) {
+    for (itr = glob->torrents; itr != NULL; itr = itr->next) {
         if (itr->mcastaddr != NULL) {
             /* Data to create beacons for rendezvous. */
             beaconparams[beaconindex].srcaddr = itr->srcaddr;
@@ -549,12 +550,14 @@ int main(int argc, char **argv) {
             beaconparams[beaconindex].beaconport = itr->mcastport;
             beaconparams[beaconindex].frequency = DAG_MULTIPLEX_BEACON_FREQ;
             beaconparams[beaconindex].monitorid = itr->monitorid;
+            beaconparams[beaconindex].ttl = itr->ttl;
             /* Streamparameters to sort incoming packets into. */
             params.sinks[beaconindex].color = itr->color;
             params.sinks[beaconindex].sourceaddr = itr->srcaddr;
             params.sinks[beaconindex].multicastgroup = itr->mcastaddr;
             params.sinks[beaconindex].monitorid = itr->monitorid;
             params.sinks[beaconindex].mtu = itr->mtu;
+            params.sinks[beaconindex].ttl = itr->ttl;
             /* The config maintains ownership of the name. */
             params.sinks[beaconindex].name = itr->name;
             /* Got one.*/
