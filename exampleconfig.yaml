@@ -6,7 +6,7 @@
 
 dagdev: /dev/dag0
 
-darknetoctet: 44
+darknetoctet: 12
 
 statinterval: 60
 
@@ -20,7 +20,7 @@ outputs:
     srcaddr: xx.yy.zz.aa
     mtu: 8960
     filterfile: /path/to/filter1
-    monitorid: 44
+    monitorid: 12
     ttl: 4
   -
     name: sink-y
@@ -29,7 +29,7 @@ outputs:
     srcaddr: xx.yy.zz.aa
     mtu: 8961
     filterfile: /path/to/filter2
-    monitorid: 45
+    monitorid: 13
     ttl: 2
     exclude: false
   -
@@ -38,7 +38,7 @@ outputs:
     mcastport: 44008
     srcaddr: xx.yy.zz.aa
     mtu: 8962
-    monitorid: 46
+    monitorid: 14
     ttl: 2
     # ^ default
   -
