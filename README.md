@@ -1,4 +1,4 @@
-# dagmulticaster
+# DAG Multicaster (nDAG server)
 
 ## ndag-telescope configuration
 
@@ -14,3 +14,7 @@ Since filters can overlap and change at runtime conflicts will be resolved as fo
 2. *Exclude* filters have priority over mirroring filters. In case of a conflict packets will only go to filters that have the `exclude` option set to `true`.
 3. *Mirror* filters duplicate packets that don't conflict with one of the above rules.
 4. The *default* sink takes all traffic that is not dropped or excluded.
+
+## License
+
+The STARDUST DAG-Multicaster is released for academic, non-commerical use. See the full [LICENSE](/LICENSE) for more information.
