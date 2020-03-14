@@ -50,6 +50,7 @@ typedef struct ndagencapparams {
     struct addrinfo *target;
     uint64_t starttime;
     uint16_t maxdgramsize;
+    uint8_t encap_type;
 
     struct mmsghdr *mmsgbufs;
     char *headerspace[NDAG_BATCH_SIZE];
@@ -62,6 +63,7 @@ enum {
     //NDAG_PKT_RESTARTED = 0x03,
     NDAG_PKT_ENCAPRT = 0x04,
     NDAG_PKT_KEEPALIVE = 0x05,
+    NDAG_PKT_CORSAROTAG = 0x06,
 };
 
 /* == Protocol header structures == */
@@ -100,7 +102,7 @@ int ndag_send_keepalive(ndag_encap_params_t *params);
 
 void ndag_init_encap(ndag_encap_params_t *params, int sock,
         struct addrinfo *targetinfo, uint16_t monitorid, uint16_t streamid,
-        uint64_t start, uint16_t mtu, int compress);
+        uint64_t start, uint16_t mtu, uint8_t encap_type, int compress);
 void ndag_reset_encap_state(ndag_encap_params_t *params);
 uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
         struct iovec *iovecs, uint16_t num_iov, uint16_t reccount, int index);

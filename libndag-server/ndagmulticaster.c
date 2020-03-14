@@ -135,7 +135,7 @@ void ndag_close_multicaster_socket(int ndagsock, struct addrinfo *targetinfo) {
 
 void ndag_init_encap(ndag_encap_params_t *params, int sock,
         struct addrinfo *targetinfo, uint16_t monitorid, uint16_t streamid,
-        uint64_t start, uint16_t mtu, int compress) {
+        uint64_t start, uint16_t mtu, uint8_t encap_type, int compress) {
 
     int i, j;
 
@@ -145,6 +145,7 @@ void ndag_init_encap(ndag_encap_params_t *params, int sock,
     params->seqno = 1;
     params->starttime = start;
     params->maxdgramsize = mtu;
+    params->encap_type = encap_type;
     params->monitorid = monitorid;
     params->mmsgbufs = (struct mmsghdr *)calloc(sizeof(struct mmsghdr),
             NDAG_BATCH_SIZE);
@@ -212,7 +213,7 @@ uint16_t ndag_push_encap_iovecs(ndag_encap_params_t *params,
     int i;
 
     encap = (ndag_encap_t *)(populate_common_header(params->headerspace[index],
-            params->monitorid, NDAG_PKT_ENCAPERF));
+            params->monitorid, params->encap_type));
     encap->started = params->starttime;
     encap->seqno = htonl(params->seqno);
     encap->streamid = htons(params->streamnum);
