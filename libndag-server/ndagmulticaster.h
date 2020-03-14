@@ -1,6 +1,14 @@
 #ifndef NDAGMULTICASTER_H_
 #define NDAGMULTICASTER_H_
 
+#include "config.h"
+
+#ifdef HAVE_DAGAPI
+#include <dagapi.h>
+#else
+#include <libtrace/dagformat.h>
+#endif
+
 #include <sys/socket.h>
 #include <stdlib.h>
 #include <sys/types.h>

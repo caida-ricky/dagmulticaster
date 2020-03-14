@@ -10,7 +10,6 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
-#include <dagapi.h>
 #include <pthread.h>
 
 #include "byteswap.h"
