@@ -20,6 +20,8 @@
 #include <sys/syscall.h>
 #endif
 
+#include <libtrace/dagformat.h>
+
 volatile int halted = 0;
 
 int ndag_interrupt_beacon(void) {

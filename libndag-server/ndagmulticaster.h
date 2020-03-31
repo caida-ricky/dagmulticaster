@@ -1,7 +1,6 @@
 #ifndef NDAGMULTICASTER_H_
 #define NDAGMULTICASTER_H_
 
-#include <libtrace/dagformat.h>
 #include <sys/socket.h>
 #include <stdlib.h>
 #include <sys/types.h>
