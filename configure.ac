@@ -55,6 +55,9 @@ fi
 
 if test "$dag_found" = 0; then
         AC_MSG_ERROR(Required library libdag not found; use LDFLAGS to specify library location)
+else
+        EXTRA_LIBS="$EXTRA_LIBS -ldag"
+        AC_DEFINE(HAVE_DAGAPI, 1, "Compiled with libdag support")
 fi
 
 if test "$dagconf_found" = 0; then

@@ -159,7 +159,7 @@ int init_dag_sink(ndag_encap_params_t *state, streamsink_t *params, int streamnu
     }
 
     ndag_init_encap(state, sock, targetinfo, params->monitorid, streamnum,
-        globalstart, params->mtu, 0);
+        globalstart, params->mtu, NDAG_PKT_ENCAPERF, 0);
     return sock;
 }
 

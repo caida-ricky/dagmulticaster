@@ -140,7 +140,7 @@ int init_dag_stream(dagstreamthread_t *dst, ndag_encap_params_t *state) {
 
     ndag_init_encap(state, sock, targetinfo, dst->params.monitorid,
             dst->params.streamnum, dst->params.globalstart, dst->params.mtu,
-            0);
+            NDAG_PKT_ENCAPERF, 0);
     return sock;
 }
 
