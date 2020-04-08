@@ -6,7 +6,4 @@ ndag_telescope_SOURCES=telescope.c telescope.h \
 			configparser.c \
 			byteswap.c byteswap.h
 
-ndag_telescope_LDADD = @ADD_LIBS@ -lndagserver
-ndag_telescope_LDFLAGS=-L"$(top_srcdir)/libndag-server/.libs"
-ndag_telescope_CFLAGS=-I"$(top_srcdir)/libndag-server"
-
+ndag_telescope_LDADD =
