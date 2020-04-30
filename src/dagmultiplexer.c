@@ -203,10 +203,10 @@ static inline void log_stats(dagstreamthread_t *dst, struct timeval now) {
                  dst->stats.truncated_records);
         for (i = 0; i < dst->inuse; ++i) {
             wandio_printf(logf,
-                 "%s_tx_datagrams %"PRIu64"\n"
-                 "%s_tx_records %"PRIu64"\n"
-                 "%s_tx_bytes %"PRIu64"\n"
-                 "%s_tx_wire_bytes %"PRIu64"\n",
+                 "sink=%s tx_datagrams %"PRIu64"\n"
+                 "sink=%s tx_records %"PRIu64"\n"
+                 "sink=%s tx_bytes %"PRIu64"\n"
+                 "sink=%s tx_wire_bytes %"PRIu64"\n",
                  dst->stats.sinks[i].name,
                  dst->stats.sinks[i].tx_datagrams,
                  dst->stats.sinks[i].name,
