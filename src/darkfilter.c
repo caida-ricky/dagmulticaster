@@ -160,6 +160,7 @@ err:
     return -1;
 }
 
+
 darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
                                               darkfilter_file_t* files) {
     darkfilter_filter_t *filter;
@@ -195,8 +196,10 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
     filter->current_exclude = 0;
 
     for (i = 0; i < cnt; ++i) {
-        if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
-          goto err;
+        if (filter->files[i].source==0){
+            if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
+               goto err;
+            }
         }
     }
 
@@ -235,6 +238,47 @@ int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
     return 0;
 }
 
+
+int apply_filters(darkfilter_t *state, char *pktbuf) {
+    libtrace_ip_t  *ip_hdr  = NULL;
+    uint32_t ip_addr;
+    int scolor, dcolor;
+    scolor=dcolor=0;
+    /* Prepare a libtrace packet. */
+    if (trace_prepare_packet(state->dummytrace, state->packet, pktbuf,
+                             TRACE_RT_DATA_ERF,
+                             TRACE_PREP_DO_NOT_OWN_BUFFER) == -1) {
+        fprintf(stderr,
+                "Unable to convert DAG buffer contents to libtrace packet.\n");
+        return -1;
+    }
+
+    /* Check for IPv4. */
+    if((ip_hdr = trace_get_ip(state->packet)) == NULL) {
+        goto skip;
+    }
+
+    /* Extract destination address. */
+    ip_addr = htonl(ip_hdr->ip_dst.s_addr);
+    
+    /* Check if prefix matches the darknet. */
+    if((ip_addr & 0xFF000000) != state->filter->darknet) {
+        goto skip;
+    }
+    scolor = apply_sourcefilter(state->srcfilter, ip_hdr->ip_src);
+    if (scolor==0){
+        return (int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8];
+    }else{
+        return scolor;
+    }
+    /* Return matching color(s). */
+    
+    skip:
+    /* Color 0 will drop the packet, see telescope.h. */
+    return 0;
+
+}
+
 int apply_darkfilter(darkfilter_t *state, char *pktbuf) {
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
@@ -270,7 +314,8 @@ skip:
 }
 
 void *create_darkfilter(void *params) {
-    darkfilter_filter_t *filter = (darkfilter_filter_t *)params;
+    //copy filter pointers from pesudofilters
+    darkfilter_t *pfilter = (darkfilter_t *)params;
     darkfilter_t *state = NULL;
 
     state = (darkfilter_t *)malloc(sizeof(darkfilter_t));
@@ -278,7 +323,8 @@ void *create_darkfilter(void *params) {
         goto err;
     }
 
-    state->filter = filter;
+    state->filter = pfilter->filter;
+    state->srcfilter = pfilter->sfilter;
     state->dummytrace = trace_create_dead("erf:dummy.erf");
     state->packet = trace_create_packet();
 

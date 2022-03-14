@@ -22,6 +22,7 @@
 #include "ndagmulticaster.h"
 #include "byteswap.h"
 #include "darkfilter.h"
+#include "sourcefilter.h"
 
 /* Check if bit at position `needle` is set in `haystack`. */
 #define IS_SET(haystack, needle) (((haystack >> needle) & 0x1) != 0)
@@ -31,6 +32,7 @@
 
 static volatile sig_atomic_t reload = 0;
 static pthread_t darkfilter_tid;
+static pthread_t srcfilter_tid;
 
 static int leading_zeros(uint8_t color) {
   assert(color > 0);
@@ -119,7 +121,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
         }
 
         if (filter) {
-            color = apply_darkfilter(filter, bottom);
+            color = apply_filters(filter, bottom);
+            //color = apply_darkfilter(filter, bottom);
             if (color < 0) {
                 fprintf(stderr, "Error applying darknet filter to received "
                         "traffic.\n");
@@ -355,6 +358,31 @@ perdagstreamexit:
     pthread_exit(NULL);
 }
 
+static void *filters_reloader(void *filterdata){
+    darkfilter_t *filters = (darkfilter_t *)filterdata;
+    darkfilter_filter_t *darkfilter = (darkfilter_filter_t *) filters->filter;
+    sourcefilter_filter_t *srcfilter = (sourcefilter_filter_t *)filters->srcfilter;
+    while (!is_halted()) {
+        if (reload) {
+            fprintf(stderr, "Starting darkfilter reload\n");
+            if (update_darkfilter_exclusions(darkfilter) != 0) {
+                /* parsing the file probably failed, so just log the error and
+                   move on */
+                fprintf(stderr, "Failed to reload darkfilter exclusion file\n");
+            }
+            if (update_sourcefilter(srcfilter)!=0){
+                fprintf(stderr, "Failed to reload srcfilter exclusion file\n");
+            }
+            reload = 0;
+        }
+        usleep(1000);
+    }
+
+    pthread_exit(NULL);
+
+}
+
+
 static void *darkfilter_reloader(void *threaddata) {
     darkfilter_filter_t *darkfilter = (darkfilter_filter_t *)threaddata;
 
@@ -376,16 +404,29 @@ static void *darkfilter_reloader(void *threaddata) {
     pthread_exit(NULL);
 }
 
-static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt,
+static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt, 
                                             darkfilter_file_t *files) {
     darkfilter_filter_t *darkfilter =
         create_darkfilter_filter(first_octet, cnt, files);
-
+    
     /* create thread to watch for reload events and trigger exclusion updates */
     if (pthread_create(&darkfilter_tid, NULL, darkfilter_reloader,
                        (void *)darkfilter) != 0) {
         fprintf(stderr, "Failed to create darkfilter reloader thread\n");
         destroy_darkfilter_filter(darkfilter);
+        return NULL;
+    }
+
+    return darkfilter;
+}
+
+
+static sourcefilter_filter_t * init_srcfilter(int srcfileidx, darkfilter_file_t *files){
+    sourcefilter_filter_t * sfilter = create_sourcefilter_filter(files[srcfileidx]);
+    if (pthread_create(&srcfilter_tid, NULL, srcfilter_reloader,
+                       (void *)sfilter) != 0) {
+        fprintf(stderr, "Failed to create srcfilter reloader thread\n");
+        destroy_sourcefilter_filter(sfilter);
         return NULL;
     }
 
@@ -406,15 +447,17 @@ int main(int argc, char **argv) {
     int beaconindex = 0;
     int filecnt = 0;
     int fileindex = 0;
+    int srcfileindex = 0;
     ndag_beacon_params_t *beaconparams = NULL;
     darkfilter_file_t *darkfilterfiles = NULL;
     darkfilter_filter_t *darkfilter = NULL;
+    sourcefilter_filter_t * srcfilter = NULL;
     time_t t;
     uint16_t firstport;
     struct timeval starttime;
     struct sigaction sigact;
     torrent_t *itr;
-
+    darkfilter_t pesudofilter;
     srand((unsigned) time(&t));
 
     /* Process user config options */
@@ -509,7 +552,7 @@ int main(int argc, char **argv) {
         if (itr->mcastaddr != NULL) {
             ++beaconcnt;
         }
-        if (itr->filterfile != NULL) {
+        if (itr->filterfile != NULL || itr->sourcefilterfile != NULL) {
             ++filecnt;
         }
     }
@@ -568,27 +611,47 @@ int main(int argc, char **argv) {
             darkfilterfiles[fileindex].color = itr->color;
             darkfilterfiles[fileindex].excl_file = itr->filterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
+            darkfilterfiles[fileindex].source = 0;
             itr->filterfile = NULL; // Transfer ownership.
             /* Got one.*/
             fileindex += 1;
         }
+        //add source filter entry
+        if (itr->sourcefilterfile != NULL){
+            darkfilterfiles[fileindex].color = itr->color;
+            darkfilterfiles[fileindex].excl_file = itr->filterfile;
+            darkfilterfiles[fileindex].exclude = itr->exclude;
+            darkfilterfiles[fileindex].source = 1;
+            itr->filterfile = NULL; // Transfer ownership.
+            /* Got one.*/
+            srcfileindex = fileindex;
+            fileindex += 1;
+        }
     }
+    //pesudofilter is only for carrying both darkfilter and srcfilter
+    //pesudofilter = (darkfilter_t *)malloc(sizeof(darkfilter_t));
 
     /* boot up the things needed for managing the darkfilter */
-    darkfilter = init_darkfilter(glob->darknetoctet, filecnt, darkfilterfiles);
+    darkfilter = init_darkfilter(glob->darknetoctet, filecnt,  darkfilterfiles);
     if (!darkfilter) {
         fprintf(stderr, "Failed to create darkfilter filter.\n");
         goto finalcleanup;
     }
-
+    srcfilter = init_srcfilter(srcfileindex, darkfilterfiles);
+    if (!srcfilter){
+        fprintf(stderr, "Failed to create sourcefilter filter.\n");
+        goto finalcleanup;
+    }
+    pesudofilter.filter = darkfilter;
+    pesudofilter.srcfilter = srcfilter;
     while (!is_halted()) {
         if (darkfilter) {
             errorstate = run_dag_streams(dagfd, firstport, beaconcnt,
-                    beaconparams, &params, darkfilter, create_darkfilter,
+                    beaconparams, &params, &pesudofilter, create_darkfilter,
                     per_dagstream, destroy_darkfilter);
         } else {
             errorstate = run_dag_streams(dagfd, firstport, beaconcnt,
-                    beaconparams, &params, NULL, NULL, per_dagstream, NULL);
+                    beaconparams, &params, NULL,  NULL, per_dagstream, NULL);
         }
 
         if (errorstate != 0) {
@@ -606,9 +669,15 @@ int main(int argc, char **argv) {
     dag_close(dagfd);
 
 finalcleanup:
+    //need to clean up source filter as well
     if (darkfilter) {
         pthread_join(darkfilter_tid, NULL);
         destroy_darkfilter_filter(darkfilter);
+    }
+
+    if (srcfilter) {
+        pthread_join(srcfilter_tid, NULL);
+        destroy_sourcefilter_filter(srcfilter);
     }
     // TODO: Should this happen in `destroy_darkfilter`?
     if (darkfilterfiles) {

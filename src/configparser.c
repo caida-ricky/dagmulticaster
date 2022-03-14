@@ -4,6 +4,7 @@
 #include <assert.h>
 
 #include "telescope.h"
+#include "sourcefilter.h"
 
 static int parse_onoff_option(char *value, uint8_t *opt) {
     if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
@@ -26,6 +27,7 @@ static int parse_torrents(telescope_global_t *glob,
     int torrentcount = 0;
     int nostreamcount = 0;
     int nofiltercount = 0;
+    int srcfiltercount = 0;
     torrent_t *current = NULL;
     torrent_t *new = NULL;
 
@@ -66,6 +68,7 @@ static int parse_torrents(telescope_global_t *glob,
         new->mcastaddr = NULL;
         new->srcaddr = NULL;
         new->filterfile = NULL;
+        new->sourcefilterfile = NULL;
         new->mcastport = 0;
         new->mtu = 0;
         new->monitorid = 0;
@@ -137,6 +140,11 @@ static int parse_torrents(telescope_global_t *glob,
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                         && !strcmp((char *)key->data.scalar.value, "sourcefilterfile")) {
+                current->filterfile = strdup((char *)value->data.scalar.value);
+            }
+
+            else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "name")) {
                 current->name = strdup((char *)value->data.scalar.value);
             }
@@ -178,36 +186,57 @@ static int parse_torrents(telescope_global_t *glob,
         }
 
         /* Assign color to filter, see telescope.h for rules. */
-        if (current->filterfile != NULL && current->mcastaddr !=  NULL) {
-            if (nextcolorshift >= 8) {
+
+        if (current->sourcefilterfile == NULL){
+            //source filter is NULL
+            if (current->filterfile != NULL && current->mcastaddr !=  NULL) {
+                //if (nextcolorshift >= 8) {
+                if (nextcolorshift >= 7) {
+                    //reserve 7 for source filter
+                    fprintf(stderr,
+                        "Too many streams. Cannot handle more than eight multicast "
+                        "groups.\n");
+                    goto torrentparseerror;
+                }
+                current->color = 0x1 << nextcolorshift;
+                ++nextcolorshift;
+            }else if (current->filterfile != NULL && current->mcastaddr == NULL) {
+                current->color = 0x0;
+                ++nostreamcount;
+                if (current->exclude == 0) {
+                    fprintf(stderr,
+                        "WARNING: Filters that drop packets must be excluded from "
+                        "the default sink, enabling flag.\n");
+                    current->exclude = 1;
+                }
+            }else if (current->filterfile == NULL && current->mcastaddr != NULL) {
+                current->color = 0x1;
+                ++nofiltercount;
+                if (current->exclude == 0) {
+                    fprintf(stderr,
+                        "WARNING: Exclude flag has no effect on the default sink.\n");
+                }
+            }else {
+                /* All NULL. */
                 fprintf(stderr,
-                    "Too many streams. Cannot handle more than eight multicast "
-                    "groups.\n");
+                    "Found empty entry. Specify a sourcefilter, filterfile, or mcastaddr.\n");
                 goto torrentparseerror;
             }
-            current->color = 0x1 << nextcolorshift;
-            ++nextcolorshift;
-        } else if (current->filterfile != NULL && current->mcastaddr == NULL) {
-            current->color = 0x0;
-            ++nostreamcount;
-            if (current->exclude == 0) {
+        }else{
+            /* Source filter is not NULL*/
+            if (current->filterfile == NULL && current->mcastaddr != NULL){
+                current->color = 0x1 << PROTECTSTREAMCOLOR;
+                ++srcfiltercount;    
+            }else if (current->filterfile != NULL){
                 fprintf(stderr,
-                    "WARNING: Filters that drop packets must be excluded from "
-                    "the default sink, enabling flag.\n");
-                current->exclude = 1;
-            }
-        } else if (current->filterfile == NULL && current->mcastaddr != NULL) {
-            current->color = 0x1;
-            ++nofiltercount;
-            if (current->exclude == 0) {
+                    "Source filter is not compatiable with exclude filter.\n");
+                goto torrentparseerror;
+            }else{
+                /* mcastaddr is NULL*/
                 fprintf(stderr,
-                    "WARNING: Exclude flag has no effect on the default sink.\n");
+                    "Specify a mcastaddr for sourcefilter.\n");
+                goto torrentparseerror;
             }
-        } else {
-            /* Both NULL. */
-            fprintf(stderr,
-                "Found empty entry. Specify either a filterfile or mcastaddr.\n");
-            goto torrentparseerror;
         }
 
         /* Got one. */
@@ -218,6 +247,11 @@ static int parse_torrents(telescope_global_t *glob,
     if (nofiltercount != 1) {
         fprintf(stderr, "Please specify exactly one default sink, i.e., "
             "an entry without a filterfile.\n");
+        goto torrentparseerror;
+    }
+    /* Only allow one source IP filter */
+    if (srcfiltercount >1 ) {
+        fprintf(stderr, "Only support at most one source filter\n");
         goto torrentparseerror;
     }
 
@@ -408,6 +442,10 @@ void telescope_cleanup_torrent(torrent_t *torr) {
 
     if (torr->filterfile) {
         free(torr->filterfile);
+    }
+
+    if (torr->sourcefilterfile) {
+        free(torr->sourcefilterfile);
     }
 
     if (torr->name) {

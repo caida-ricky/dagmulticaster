@@ -23,11 +23,13 @@ typedef struct torrent {
      * Reserved bitmasks
      *  0x0 --> drop packets
      *  0x1 --> default route
+     *  0x10000000 --> source filter route
      */
     color_t color;
     char *mcastaddr;
     char *srcaddr;
     char *filterfile;
+    char *sourcefilterfile;
     char *name;
     uint16_t mcastport;
     uint16_t mtu;

@@ -6,11 +6,13 @@
 #include <wandio.h>
 
 #include "dagmultiplexer.h"
+#include "sourcefilter.h"
 
 typedef struct darkfilter_file {
   color_t color;
   char *excl_file;
   uint8_t exclude; // bool
+  uint8_t source; //0: original dark filter, 1: source filter
 } darkfilter_file_t;
 
 typedef struct filter {
@@ -25,6 +27,7 @@ typedef struct filter {
 } darkfilter_filter_t;
 
 typedef struct darkfilter {
+    sourcefilter_filter_t * srcfilter; // source filter
     darkfilter_filter_t *filter; // shared filter state
     libtrace_t *dummytrace;
     libtrace_packet_t *packet;
