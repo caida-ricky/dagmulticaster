@@ -324,7 +324,7 @@ void *create_darkfilter(void *params) {
     }
 
     state->filter = pfilter->filter;
-    state->srcfilter = pfilter->sfilter;
+    state->srcfilter = pfilter->srcfilter;
     state->dummytrace = trace_create_dead("erf:dummy.erf");
     state->packet = trace_create_packet();
 

@@ -383,10 +383,10 @@ static void *filters_reloader(void *filterdata){
 
 }
 
-static void init_filter_reloader(darkfilter_t *threaddata){
+static int init_filter_reloader(darkfilter_t *threaddata){
     darkfilter_t *filters = threaddata;
     if (pthread_create(&filter_tid, NULL, filters_reloader,
-                       (void * )threaddata != 0)) {
+                       (void *)threaddata != 0)) {
         fprintf(stderr, "Failed to create filter reloader thread\n");
         if (filters->filter != NULL){
             destroy_darkfilter_filter(filters->filter);
@@ -394,8 +394,9 @@ static void init_filter_reloader(darkfilter_t *threaddata){
         if (filters->srcfilter != NULL) {
             destroy_sourcefilter_filter(filters->srcfilter);
         }
-        return NULL;
+        return -1;
     }
+    return 0;
 }
 
 static void *darkfilter_reloader(void *threaddata) {
@@ -663,7 +664,10 @@ int main(int argc, char **argv) {
     }
     pesudofilter.filter = darkfilter;
     pesudofilter.srcfilter = srcfilter;
-    init_filter_reloader(&pesudofilter);
+    if (init_filter_reloader(&pesudofilter)!=0){
+        fprintf(stderr, "Failed to start reloader thread.\n");
+        goto finalcleanup;
+    }
     while (!is_halted()) {
         if (darkfilter) {
             errorstate = run_dag_streams(dagfd, firstport, beaconcnt,
