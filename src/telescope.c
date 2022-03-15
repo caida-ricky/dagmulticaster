@@ -386,7 +386,7 @@ static void *filters_reloader(void *filterdata){
 static void init_filter_reloader(darkfilter_t *threaddata){
     darkfilter_t *filters = threaddata;
     if (pthread_create(&filter_tid, NULL, filters_reloader,
-                       (void * )(threaddata) != 0) {
+                       (void * )threaddata != 0)) {
         fprintf(stderr, "Failed to create filter reloader thread\n");
         if (filters->filter != NULL){
             destroy_darkfilter_filter(filters->filter);
@@ -438,7 +438,10 @@ static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt,
 
 
 static sourcefilter_filter_t * init_srcfilter(int srcfileidx, darkfilter_file_t *files){
-    sourcefilter_filter_t * sfilter = create_sourcefilter_filter(&files[srcfileidx]);
+    sourcefilter_file_t sfile;
+    sfile.color = files[srcfileidx].color;
+    strcpy(sfile.exclsrc,files[srcfileidx].excl_file);
+    sourcefilter_filter_t * sfilter = create_sourcefilter_filter(&sfile);
     /*if (pthread_create(&srcfilter_tid, NULL, filters_reloader,
                        (void *)sfilter) != 0) {
         fprintf(stderr, "Failed to create srcfilter reloader thread\n");
