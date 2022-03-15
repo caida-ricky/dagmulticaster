@@ -31,6 +31,7 @@
 #define SET_IT(haystack, position) (haystack |= (0x1 << position))
 
 static volatile sig_atomic_t reload = 0;
+static pthread_t filter_tid;
 static pthread_t darkfilter_tid;
 static pthread_t srcfilter_tid;
 
@@ -382,6 +383,20 @@ static void *filters_reloader(void *filterdata){
 
 }
 
+static void init_filter_reloader(darkfilter_t *threaddata){
+    darkfilter_t *filters = threaddata;
+    if (pthread_create(&filter_tid, NULL, filters_reloader,
+                       (void * )(threaddata) != 0) {
+        fprintf(stderr, "Failed to create filter reloader thread\n");
+        if (filters->filter != NULL){
+            destroy_darkfilter_filter(filters->filter);
+        }
+        if (filters->srcfilter != NULL) {
+            destroy_sourcefilter_filter(filters->srcfilter);
+        }
+        return NULL;
+    }
+}
 
 static void *darkfilter_reloader(void *threaddata) {
     darkfilter_filter_t *darkfilter = (darkfilter_filter_t *)threaddata;
@@ -410,27 +425,28 @@ static darkfilter_filter_t *init_darkfilter(int first_octet, int cnt,
         create_darkfilter_filter(first_octet, cnt, files);
     
     /* create thread to watch for reload events and trigger exclusion updates */
-    if (pthread_create(&darkfilter_tid, NULL, darkfilter_reloader,
+    /*if (pthread_create(&darkfilter_tid, NULL, filters_reloader,
                        (void *)darkfilter) != 0) {
         fprintf(stderr, "Failed to create darkfilter reloader thread\n");
         destroy_darkfilter_filter(darkfilter);
         return NULL;
-    }
+    }*/
 
     return darkfilter;
 }
 
 
+
 static sourcefilter_filter_t * init_srcfilter(int srcfileidx, darkfilter_file_t *files){
-    sourcefilter_filter_t * sfilter = create_sourcefilter_filter(files[srcfileidx]);
-    if (pthread_create(&srcfilter_tid, NULL, srcfilter_reloader,
+    sourcefilter_filter_t * sfilter = create_sourcefilter_filter(&files[srcfileidx]);
+    /*if (pthread_create(&srcfilter_tid, NULL, filters_reloader,
                        (void *)sfilter) != 0) {
         fprintf(stderr, "Failed to create srcfilter reloader thread\n");
         destroy_sourcefilter_filter(sfilter);
         return NULL;
-    }
+    }*/
 
-    return darkfilter;
+    return sfilter;
 }
 
 void print_help(char *progname) {
@@ -644,6 +660,7 @@ int main(int argc, char **argv) {
     }
     pesudofilter.filter = darkfilter;
     pesudofilter.srcfilter = srcfilter;
+    init_filter_reloader(&pesudofilter);
     while (!is_halted()) {
         if (darkfilter) {
             errorstate = run_dag_streams(dagfd, firstport, beaconcnt,

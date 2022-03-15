@@ -44,6 +44,7 @@ int update_darkfilter_exclusions(darkfilter_filter_t *filter);
  */
 void *create_darkfilter(void *filter);
 int apply_darkfilter(darkfilter_t *df, char *pktbuf);
+int apply_filters(darkfilter_t *df, char *pktbuf);
 void destroy_darkfilter(void *df);
 
 #endif
