@@ -386,7 +386,7 @@ static void *filters_reloader(void *filterdata){
 static int init_filter_reloader(darkfilter_t *threaddata){
     darkfilter_t *filters = threaddata;
     if (pthread_create(&filter_tid, NULL, filters_reloader,
-                       (void *)threaddata != 0)) {
+                       (void *)threaddata) != 0) {
         fprintf(stderr, "Failed to create filter reloader thread\n");
         if (filters->filter != NULL){
             destroy_darkfilter_filter(filters->filter);

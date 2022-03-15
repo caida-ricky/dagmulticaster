@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
+#include "dagmultiplexer.h"
 
 #define CURRENT_SRCEXCLUDE(filter) ((filter)->excludefilter[(filter)->current_exclude])
 #define HALFIPSPACE (1<<16)
