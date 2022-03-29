@@ -642,6 +642,7 @@ int main(int argc, char **argv) {
             darkfilterfiles[fileindex].excl_file = itr->filterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
             darkfilterfiles[fileindex].source = 0;
+            fprintf(stderr,"main: darkfilter idx %d name %s, color %x\n", fileindex, itr->filterfile ,itr->color);
             itr->filterfile = NULL; // Transfer ownership.
             /* Got one.*/
             fileindex += 1;
@@ -653,6 +654,7 @@ int main(int argc, char **argv) {
             darkfilterfiles[fileindex].excl_file = itr->sourcefilterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
             darkfilterfiles[fileindex].source = 1;
+            fprintf(stderr,"main: sourcefilter idx %d name %s, color %x\n", fileindex, itr->sourcefilterfile ,itr->color);
             itr->sourcefilterfile = NULL; // Transfer ownership.
             /* Got one.*/
             srcfileindex = fileindex;
