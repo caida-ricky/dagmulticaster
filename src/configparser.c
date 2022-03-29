@@ -34,7 +34,7 @@ static int parse_torrents(telescope_global_t *glob,
     /* Assign colors incrementally, starting at 0x1 << 1. We could keep a list
      * of colors in use to check if we have multiple filters that send to the
      * same multicast group. Seems a bit overkill though. */
-    int nextcolorshift = 2;
+    int nextcolorshift = 3;
 
     if (glob->torrents != NULL) {
         fprintf(stderr, "Config not empty.");
@@ -192,7 +192,7 @@ static int parse_torrents(telescope_global_t *glob,
             //source filter is NULL
             if (current->filterfile != NULL && current->mcastaddr !=  NULL) {
                 //if (nextcolorshift >= 8) {
-                if (nextcolorshift >= 7) {
+                if (nextcolorshift >= 8) {
                     //reserve 7 for source filter
                     fprintf(stderr,
                         "Too many streams. Cannot handle more than eight multicast "
