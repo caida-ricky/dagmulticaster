@@ -650,7 +650,7 @@ int main(int argc, char **argv) {
     }
     //pesudofilter is only for carrying both darkfilter and srcfilter
     //pesudofilter = (darkfilter_t *)malloc(sizeof(darkfilter_t));
-
+    fprintf(stderr,"sourcefilter %d, flag %d\n",srcfileindex, darkfilterfiles[srcfileindex].source);
     /* boot up the things needed for managing the darkfilter */
     darkfilter = init_darkfilter(glob->darknetoctet, filecnt,  darkfilterfiles);
     if (!darkfilter) {

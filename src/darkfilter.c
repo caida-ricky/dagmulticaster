@@ -196,7 +196,9 @@ darkfilter_filter_t *create_darkfilter_filter(int first_octet, int cnt,
     filter->current_exclude = 0;
 
     for (i = 0; i < cnt; ++i) {
+        fprintf(stderr,"Checking filter idx %d, source? %d\n",i,filter->files[i].source);
         if (filter->files[i].source==0){
+            
             if (parse_excl_file(CURRENT_EXCLUDE(filter), &filter->files[i]) != 0) {
                goto err;
             }
