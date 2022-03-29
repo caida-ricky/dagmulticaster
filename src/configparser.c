@@ -135,14 +135,15 @@ static int parse_torrents(telescope_global_t *glob,
             }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                         && !strcmp((char *)key->data.scalar.value, "sourcefilterfile")) {
+                current->sourcefilterfile = strdup((char *)value->data.scalar.value);
+            }
+            
+            else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "filterfile")) {
                 current->filterfile = strdup((char *)value->data.scalar.value);
             }
 
-            else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                         && !strcmp((char *)key->data.scalar.value, "sourcefilterfile")) {
-                current->filterfile = strdup((char *)value->data.scalar.value);
-            }
 
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "name")) {
