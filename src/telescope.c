@@ -631,8 +631,10 @@ int main(int argc, char **argv) {
             params.sinks[beaconindex].ttl = itr->ttl;
             /* The config maintains ownership of the name. */
             params.sinks[beaconindex].name = itr->name;
+            fprintf(stderr,"main: beacon idx %d name %s, color %x\n", beaconindex, itr->name,itr->color);
             /* Got one.*/
             beaconindex += 1;
+            
         }
         if (itr->filterfile != NULL) {
             /* Data to build the filter from exclusion files. */
