@@ -320,7 +320,7 @@ static void *per_dagstream(void *threaddata) {
          */
         /* The color bit position is our index. */
         idx = leading_zeros(dst->params.sinks[initialized].color);
-        fprintf(stderr, "per_dagstream: color %x ,lzero: %d\n",dst->params.sinks[initialized].color, idx);
+        fprintf(stderr, "per_dagstream: color %d ,lzero: %d\n",dst->params.sinks[initialized].color, idx);
         res = init_dag_sink(&state[idx], &dst->params.sinks[initialized],
             dst->params.streamnum, dst->params.globalstart);
         dst->iovs[idx].maxsize =
@@ -631,7 +631,7 @@ int main(int argc, char **argv) {
             params.sinks[beaconindex].ttl = itr->ttl;
             /* The config maintains ownership of the name. */
             params.sinks[beaconindex].name = itr->name;
-            fprintf(stderr,"main: beacon idx %d name %s, color %x\n", beaconindex, itr->name,itr->color);
+            fprintf(stderr,"main: beacon idx %d name %s, color %d\n", beaconindex, itr->name,itr->color);
             /* Got one.*/
             beaconindex += 1;
             
@@ -642,7 +642,7 @@ int main(int argc, char **argv) {
             darkfilterfiles[fileindex].excl_file = itr->filterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
             darkfilterfiles[fileindex].source = 0;
-            fprintf(stderr,"main: darkfilter idx %d name %s, color %x\n", fileindex, itr->filterfile ,itr->color);
+            fprintf(stderr,"main: darkfilter idx %d name %s, color %d\n", fileindex, itr->filterfile ,itr->color);
             itr->filterfile = NULL; // Transfer ownership.
             /* Got one.*/
             fileindex += 1;
@@ -654,7 +654,7 @@ int main(int argc, char **argv) {
             darkfilterfiles[fileindex].excl_file = itr->sourcefilterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
             darkfilterfiles[fileindex].source = 1;
-            fprintf(stderr,"main: sourcefilter idx %d name %s, color %x\n", fileindex, itr->sourcefilterfile ,itr->color);
+            fprintf(stderr,"main: sourcefilter idx %d name %s, color %d\n", fileindex, itr->sourcefilterfile ,itr->color);
             itr->sourcefilterfile = NULL; // Transfer ownership.
             /* Got one.*/
             srcfileindex = fileindex;
