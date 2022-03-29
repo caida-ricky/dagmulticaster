@@ -320,6 +320,7 @@ static void *per_dagstream(void *threaddata) {
          */
         /* The color bit position is our index. */
         idx = leading_zeros(dst->params.sinks[initialized].color);
+        fprintf(stderr, "per_dagstream: color %x ,lzero: %d\n",dst->params.sinks[initialized].color, idx);
         res = init_dag_sink(&state[idx], &dst->params.sinks[initialized],
             dst->params.streamnum, dst->params.globalstart);
         dst->iovs[idx].maxsize =
@@ -645,7 +646,7 @@ int main(int argc, char **argv) {
         }
         //add source filter entry
         if (itr->sourcefilterfile != NULL){
-            fprintf(stderr,"sourcefilterfile %s, color %d\n",itr->sourcefilterfile,itr->color );
+            //fprintf(stderr,"sourcefilterfile %s, color %d\n",itr->sourcefilterfile,itr->color );
             darkfilterfiles[fileindex].color = itr->color;
             darkfilterfiles[fileindex].excl_file = itr->sourcefilterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
@@ -658,7 +659,7 @@ int main(int argc, char **argv) {
     }
     //pesudofilter is only for carrying both darkfilter and srcfilter
     //pesudofilter = (darkfilter_t *)malloc(sizeof(darkfilter_t));
-    fprintf(stderr,"sourcefilter %d, flag %d\n",srcfileindex, darkfilterfiles[srcfileindex].source);
+    //fprintf(stderr,"sourcefilter %d, flag %d\n",srcfileindex, darkfilterfiles[srcfileindex].source);
     /* boot up the things needed for managing the darkfilter */
     darkfilter = init_darkfilter(glob->darknetoctet, filecnt,  darkfilterfiles);
     if (!darkfilter) {

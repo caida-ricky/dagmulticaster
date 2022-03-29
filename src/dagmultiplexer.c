@@ -321,7 +321,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
         for (i = 0; i < dst->inuse; ++i) {
             ndag_reset_encap_state(&state[i]);
         }
-
+        fprintf(stderr, "dag_stream_loop: before walk_records\n");
         walk_records((char **)(&bottom), (char *)top, dst, savedtosend,
                 records_walked, state);
 
