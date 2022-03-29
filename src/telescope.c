@@ -638,11 +638,12 @@ int main(int argc, char **argv) {
         }
         //add source filter entry
         if (itr->sourcefilterfile != NULL){
+            fprintf(stderr,"sourcefilterfile %s\n",itr->sourcefilterfile );
             darkfilterfiles[fileindex].color = itr->color;
-            darkfilterfiles[fileindex].excl_file = itr->filterfile;
+            darkfilterfiles[fileindex].excl_file = itr->sourcefilterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;
             darkfilterfiles[fileindex].source = 1;
-            itr->filterfile = NULL; // Transfer ownership.
+            itr->sourcefilterfile = NULL; // Transfer ownership.
             /* Got one.*/
             srcfileindex = fileindex;
             fileindex += 1;
