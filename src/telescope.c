@@ -645,7 +645,7 @@ int main(int argc, char **argv) {
         }
         //add source filter entry
         if (itr->sourcefilterfile != NULL){
-            fprintf(stderr,"sourcefilterfile %s\n",itr->sourcefilterfile );
+            fprintf(stderr,"sourcefilterfile %s, color %d\n",itr->sourcefilterfile,itr->color );
             darkfilterfiles[fileindex].color = itr->color;
             darkfilterfiles[fileindex].excl_file = itr->sourcefilterfile;
             darkfilterfiles[fileindex].exclude = itr->exclude;

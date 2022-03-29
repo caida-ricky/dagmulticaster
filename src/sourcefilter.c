@@ -7,7 +7,7 @@ static int parse_excl_source_file(sourcefilter_element_t *exclude, const sourcef
     int i;
 
     //only allow source filter in "protect" stream
-    assert(filter_file->color == PROTECTSTREAMCOLOR);
+    assert(filter_file->color == 1<<PROTECTSTREAMCOLOR);
     if ((file = wandio_create(filter_file->exclsrc)) == NULL) {
         fprintf(stderr, "Failed to open exclusion file %s\n", filter_file->exclsrc);
         return -1;
