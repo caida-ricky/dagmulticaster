@@ -34,7 +34,7 @@ static int parse_torrents(telescope_global_t *glob,
     /* Assign colors incrementally, starting at 0x1 << 1. We could keep a list
      * of colors in use to check if we have multiple filters that send to the
      * same multicast group. Seems a bit overkill though. */
-    int nextcolorshift = 1;
+    int nextcolorshift = 2;
 
     if (glob->torrents != NULL) {
         fprintf(stderr, "Config not empty.");
@@ -138,7 +138,7 @@ static int parse_torrents(telescope_global_t *glob,
                          && !strcmp((char *)key->data.scalar.value, "sourcefilterfile")) {
                 current->sourcefilterfile = strdup((char *)value->data.scalar.value);
             }
-            
+
             else if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                          && !strcmp((char *)key->data.scalar.value, "filterfile")) {
                 current->filterfile = strdup((char *)value->data.scalar.value);
