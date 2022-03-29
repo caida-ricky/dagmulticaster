@@ -572,7 +572,14 @@ int main(int argc, char **argv) {
         if (itr->mcastaddr != NULL) {
             ++beaconcnt;
         }
+        
         if (itr->filterfile != NULL || itr->sourcefilterfile != NULL) {
+            if (itr->filterfile != NULL ){
+                fprintf(stderr,"Has Filter %s\n",itr->filterfile);
+            }
+            if (itr->sourcefilterfile!=NULL){
+                fprintf(stderr,"Has SourceFilter %s\n",itr->sourcefilterfile);
+            }
             ++filecnt;
         }
     }
