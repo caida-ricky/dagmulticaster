@@ -271,6 +271,7 @@ int apply_filters(darkfilter_t *state, char *pktbuf) {
     if (scolor==0){
         return (int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8];
     }else{
+        fprintf(stderr, "apply_filters: sourcefilter got a packet to dst %s\n ",inet_ntoa(ip_hdr->ip_dst.s_addr));
         return scolor;
     }
     /* Return matching color(s). */

@@ -295,7 +295,7 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
             log_stats(dst, now);
             nextstat += dst->params.statinterval;
         }
-        fprintf(stderr, "dag_stream_loop: before dag_advance_stream. streamnum %d\n",dst->params.streamnum);
+        //fprintf(stderr, "dag_stream_loop: before dag_advance_stream. streamnum %d\n",dst->params.streamnum);
         top = dag_advance_stream(dst->params.dagfd, dst->params.streamnum,
                 (uint8_t **)(&bottom));
         if (top == NULL) {
@@ -317,11 +317,11 @@ void dag_stream_loop(dagstreamthread_t *dst, ndag_encap_params_t *state,
             }
             continue;
         }
-        fprintf(stderr, "dag_stream_loop: before ndag_reset_encap_state. inuse %d\n",dst->inuse);
+        //fprintf(stderr, "dag_stream_loop: before ndag_reset_encap_state. inuse %d\n",dst->inuse);
         for (i = 0; i < dst->inuse; ++i) {
             ndag_reset_encap_state(&state[i]);
         }
-        fprintf(stderr, "dag_stream_loop: before walk_records\n");
+        //fprintf(stderr, "dag_stream_loop: before walk_records\n");
         walk_records((char **)(&bottom), (char *)top, dst, savedtosend,
                 records_walked, state);
 
