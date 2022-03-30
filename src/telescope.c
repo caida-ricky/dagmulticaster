@@ -123,6 +123,9 @@ static char * walk_stream_buffer(char *bottom, char *top,
 
         if (filter) {
             color = apply_filters(filter, bottom);
+            if (color != 1){
+                fprintf(stderr, "walk_stream_buffer: got non-default \n");
+            }
             //color = apply_darkfilter(filter, bottom);
             if (color < 0) {
                 fprintf(stderr, "Error applying darknet filter to received "
@@ -320,7 +323,7 @@ static void *per_dagstream(void *threaddata) {
          */
         /* The color bit position is our index. */
         idx = leading_zeros(dst->params.sinks[initialized].color);
-        fprintf(stderr, "per_dagstream: color %d ,lzero: %d\n",dst->params.sinks[initialized].color, idx);
+        //fprintf(stderr, "per_dagstream: color %d ,lzero: %d\n",dst->params.sinks[initialized].color, idx);
         res = init_dag_sink(&state[idx], &dst->params.sinks[initialized],
             dst->params.streamnum, dst->params.globalstart);
         dst->iovs[idx].maxsize =
@@ -575,12 +578,6 @@ int main(int argc, char **argv) {
         }
         
         if (itr->filterfile != NULL || itr->sourcefilterfile != NULL) {
-            if (itr->filterfile != NULL ){
-                fprintf(stderr,"Has Filter %s\n",itr->filterfile);
-            }
-            if (itr->sourcefilterfile!=NULL){
-                fprintf(stderr,"Has SourceFilter %s\n",itr->sourcefilterfile);
-            }
             ++filecnt;
         }
     }
