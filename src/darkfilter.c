@@ -250,9 +250,9 @@ int apply_filters(darkfilter_t *state, char *pktbuf) {
     int scolor, dcolor;
     scolor=dcolor=0;
     testdstaddr.sin_addr.s_addr  = inet_addr("44.200.0.1");
-    testip_dst = htonl(testdstaddr.sin_addr.s_addr );
+    testip_dst = testdstaddr.sin_addr.s_addr ;
     testsrcaddr.sin_addr.s_addr  = inet_addr("192.172.226.100");
-    testip_src = htonl(testsrcaddr.sin_addr.s_addr);
+    testip_src = testsrcaddr.sin_addr.s_addr;
     /* Prepare a libtrace packet. */
     if (trace_prepare_packet(state->dummytrace, state->packet, pktbuf,
                              TRACE_RT_DATA_ERF,
