@@ -123,8 +123,8 @@ static char * walk_stream_buffer(char *bottom, char *top,
 
         if (filter) {
             color = apply_filters(filter, bottom);
-            if (color != 1){
-                fprintf(stderr, "walk_stream_buffer: got non-default \n");
+            if (color == 2){
+                fprintf(stderr, "walk_stream_buffer: got source filter packet\n");
             }
             //color = apply_darkfilter(filter, bottom);
             if (color < 0) {
