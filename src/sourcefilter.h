@@ -14,7 +14,7 @@
 #define HALFIPSPACE (1<<16)
 #define IPHIGH(ip) (ip >> 16)
 #define IPLO(ip) (ip & 0x0000FFFF)
-#define PROTECTSTREAMCOLOR 2
+#define PROTECTSTREAMCOLOR 1 //0x2
 
 //typedef uint8_t match_t;
 

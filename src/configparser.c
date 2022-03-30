@@ -34,7 +34,7 @@ static int parse_torrents(telescope_global_t *glob,
     /* Assign colors incrementally, starting at 0x1 << 1. We could keep a list
      * of colors in use to check if we have multiple filters that send to the
      * same multicast group. Seems a bit overkill though. */
-    int nextcolorshift = 3;
+    int nextcolorshift = 2;
 
     if (glob->torrents != NULL) {
         fprintf(stderr, "Config not empty.");
