@@ -244,8 +244,15 @@ int update_darkfilter_exclusions(darkfilter_filter_t *filter) {
 int apply_filters(darkfilter_t *state, char *pktbuf) {
     libtrace_ip_t  *ip_hdr  = NULL;
     uint32_t ip_addr;
+    uint32_t testip_dst, testip_src;
+    struct sockaddr_in testdstaddr, testsrcaddr;
+
     int scolor, dcolor;
     scolor=dcolor=0;
+    testdstaddr.sin_addr.s_addr  = inet_addr("44.200.0.1");
+    testip_dst = htonl(testdstaddr.sin_addr.s_addr );
+    testsrcaddr.sin_addr.s_addr  = inet_addr("192.172.226.100");
+    testip_src = htonl(testsrcaddr.sin_addr.s_addr);
     /* Prepare a libtrace packet. */
     if (trace_prepare_packet(state->dummytrace, state->packet, pktbuf,
                              TRACE_RT_DATA_ERF,
@@ -262,12 +269,22 @@ int apply_filters(darkfilter_t *state, char *pktbuf) {
 
     /* Extract destination address. */
     ip_addr = htonl(ip_hdr->ip_dst.s_addr);
-    
+
+  
     /* Check if prefix matches the darknet. */
     if((ip_addr & 0xFF000000) != state->filter->darknet) {
         goto skip;
     }
+
     scolor = apply_sourcefilter(state->srcfilter, ip_hdr->ip_src);
+
+    if (ip_addr == testip_dst){
+        fprintf(stderr, "Match test dst address, darkfilter color: %d, src color %d\n",(int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8], scolor);
+    }
+    if (htonl(ip_hdr->ip_src) == testip_src){
+        fprintf(stderr, "Match test src address, darkfilter color: %d, src color %d\n",(int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8], scolor);
+    }
+
     if (scolor==0){
         return (int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8];
     }else{
