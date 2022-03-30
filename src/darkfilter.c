@@ -281,7 +281,7 @@ int apply_filters(darkfilter_t *state, char *pktbuf) {
     if (ip_addr == testip_dst){
         fprintf(stderr, "Match test dst address, darkfilter color: %d, src color %d\n",(int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8], scolor);
     }
-    if (htonl(ip_hdr->ip_src) == testip_src){
+    if (htonl(ip_hdr->ip_src.s_addr) == testip_src){
         fprintf(stderr, "Match test src address, darkfilter color: %d, src color %d\n",(int) CURRENT_EXCLUDE(state->filter)[(ip_addr & 0x00FFFF00) >> 8], scolor);
     }
 
